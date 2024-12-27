@@ -1,0 +1,48 @@
+{
+  "name": "wfloat-react-native",
+  "version": "0.0.0",
+  "description": "Wfloat package for react native",
+  "main": "index.js",
+  "react-native": "src/index.ts",
+  "module": "lib/module/index.js",
+  "types": "lib/typescript/index.d.ts",
+  "files": [
+    "src/**",
+    "lib/**",
+    "android",
+    "ios",
+    "wfloat-react-native.podspec",
+    "!example",
+    "!android/build",
+    "!ios/build",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wfloat/wfloat-react-native.git"
+  },
+  "author": "Mitchell Sayre",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/wfloat/wfloat-react-native/issues"
+  },
+  "homepage": "https://github.com/wfloat/wfloat-react-native#readme",
+  "devDependencies": {},
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "codegenConfig": {
+    "name": "WfloatReactNative",
+    "type": "modules",
+    "jsSrcsDir": "src/specs",
+    "android": {
+      "javaPackageName": "com.wfloatreactnative"
+    }
+  }
+}
