@@ -1,8 +1,8 @@
-#import <RTNCalculatorSpec/RTNCalculatorSpec.h>
+#import <WfloatReactNativeSpec/WfloatReactNativeSpec.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface RTNCalculator : NSObject <NativeRTNCalculatorSpec>
+@interface WfloatReactNative : NSObject <NativeWfloatReactNativeSpec>
 
 @end
 

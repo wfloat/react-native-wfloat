@@ -2,10 +2,10 @@
   "name": "wfloat-react-native",
   "version": "0.0.0",
   "description": "Wfloat package for react native",
-  "main": "index.js",
-  "react-native": "src/index.ts",
-  "module": "lib/module/index.js",
-  "types": "lib/typescript/index.d.ts",
+  "main": "src/index.ts",
+  "react-native": "lib/index.js",
+  "module": "lib/index.js",
+  "types": "lib/index.d.ts",
   "files": [
     "src/**",
     "lib/**",
@@ -38,7 +38,7 @@
     "react-native": "*"
   },
   "codegenConfig": {
-    "name": "WfloatReactNative",
+    "name": "WfloatReactNativeSpec",
     "type": "modules",
     "jsSrcsDir": "src/specs",
     "android": {
