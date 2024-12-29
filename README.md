@@ -1,6 +1,6 @@
 # react-native
 cd wfloat-react-native
-npm i
+yarn
 
 node ./node_modules/react-native/scripts/generate-codegen-artifacts.js --targetPlatform ios --path ./example --outputPath ./generated
 
