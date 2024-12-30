@@ -1,3 +1,6 @@
+ios/onnxruntime.xcframework/
+ios/sherpa-onnx.xcframework/
+
 # OSX
 #
 .DS_Store
