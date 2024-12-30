@@ -1,11 +1,33 @@
-# react-native
-cd wfloat-react-native
-yarn
+# react-native-wfloat
 
-node ./node_modules/react-native/scripts/generate-codegen-artifacts.js --targetPlatform ios --path ./example --outputPath ./generated
+Wfloat package for react native
 
-cd example/ios
-rm -rf build
-bundle exec pod install
+## Installation
 
-Using yarn because https://github.com/facebook/react-native/issues/29977
+```sh
+npm install react-native-wfloat
+```
+
+## Usage
+
+
+```js
+import { multiply } from 'react-native-wfloat';
+
+// ...
+
+const result = multiply(3, 7);
+```
+
+
+## Contributing
+
+See the [contributing guide](CONTRIBUTING.md) to learn how to contribute to the repository and the development workflow.
+
+## License
+
+MIT
+
+---
+
+Made with [create-react-native-library](https://github.com/callstack/react-native-builder-bob)
