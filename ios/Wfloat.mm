@@ -1,67 +1,105 @@
 #import "Wfloat.h"
 #import "sherpa-onnx.xcframework/Headers/sherpa-onnx/c-api/c-api.h"
-
-
-/* Argument types ch``eatsheet
- * | Objective C                                   | JavaScript         |
- * |-----------------------------------------------|--------------------|
- * | NSString                                      | string, ?string    |
- * | BOOL                                          | boolean            |
- * | NSNumber                                      | ?boolean           |
- * | double                                        | number             |
- * | NSNumber                                      | ?number            |
- * | NSArray                                       | Array, ?Array      |
- * | NSDictionary                                  | Object, ?Object    |
- * | RCTResponseSenderBlock                        | Function (success) |
- * | RCTResponseSenderBlock, RCTResponseErrorBlock | Function (failure) |
- * | RCTPromiseResolveBlock, RCTPromiseRejectBlock | Promise            |
- */
+//#import "react_native_wfloat-Swift.h"
 
 @implementation Wfloat
+
 RCT_EXPORT_MODULE()
 
-- (NSNumber *)multiply:(double)a b:(double)b {
-    NSNumber *result = @(a * b);
+// - (NSNumber *)multiply:(double)a b:(double)b {
+//     NSNumber *result = @(a * b);
 
-    return result;
-}
+//     return result;
+// }
 
-- (NSNumber *)subtract:(double)a b:(double)b {
-    NSNumber *result = @(a - b);
+// - (NSNumber *)subtract:(double)a b:(double)b {
+//     NSNumber *result = @(a - b);
 
-    return result;
-}
+//     return result;
+// }
 
-- (SherpaOnnxOfflineTtsVitsModelConfig *)createTtsModelConfigWithModel:(NSString *)model
-                                                               lexicon:(NSString *)lexicon
-                                                               tokens:(NSString *)tokens
-                                                              dataDir:(NSString *)dataDir
-                                                           noiseScale:(float)noiseScale
-                                                         noiseScaleW:(float)noiseScaleW
-                                                         lengthScale:(float)lengthScale
-                                                              dictDir:(NSString *)dictDir {
-    SherpaOnnxOfflineTtsVitsModelConfig *config = new SherpaOnnxOfflineTtsVitsModelConfig();
-    config->model = [self toCPointer:model];
-    config->lexicon = [self toCPointer:lexicon];
-    config->tokens = [self toCPointer:tokens];
-    config->data_dir = [self toCPointer:(dataDir.length > 0 ? dataDir : @"")];
-    config->noise_scale = noiseScale;
-    config->noise_scale_w = noiseScaleW;
-    config->length_scale = lengthScale;
-    config->dict_dir = [self toCPointer:(dictDir.length > 0 ? dictDir : @"")];
-    
-    return config;
-}
+// // Expose the Swift testSpeech method to React Native
+// RCT_EXPORT_METHOD(testSpeech:(NSInteger)a b:(NSInteger)b resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+//     @try {
+//         // Call the Swift static method
+//         NSInteger result = [Wfloat testSpeechWithA:a b:b];
+//         resolve(@(result)); // Resolve the promise with the result
+//     } @catch (NSException *exception) {
+//         reject(@"testSpeech_error", exception.reason, nil); // Reject the promise with an error
+//     }
+// }
 
-// Helper method to convert NSString to C strings
-- (const char *)toCPointer:(NSString *)string {
-    return [string UTF8String];
-}
+//RCT_REMAP_METHOD(add, addA:(NSInteger)a
+//                        andB:(NSInteger)b
+//                withResolver:(RCTPromiseResolveBlock) resolve
+//                withRejecter:(RCTPromiseRejectBlock) reject)
+//{
+//  return [self add:a b:b resolve:resolve reject:reject];
+//}
 
+#ifdef RCT_NEW_ARCH_ENABLED
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
     (const facebook::react::ObjCTurboModule::InitParams &)params
 {
     return std::make_shared<facebook::react::NativeWfloatSpecJSI>(params);
 }
+#endif
+
+//- (void)add:(double)a b:(double)b resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+//  // NSNumber *result = @([Wfloat addWithA:a b:b]);
+//  double sum = a + b;
+//  NSNumber *result = [NSNumber numberWithDouble:sum];
+//  resolve(result);
+//}
+
+NSString *getResourcePath(NSString *filename) {
+    NSBundle *bundle = [NSBundle mainBundle];
+    NSString *fullPath = [bundle pathForResource:filename ofType:nil];
+    return fullPath;
+}
+
+- (NSString *)speech {
+  NSString *espeakPath = @"espeak-ng-data";
+  NSBundle *bundle = [NSBundle mainBundle];
+  NSString *dataDir = [bundle.resourceURL URLByAppendingPathComponent:espeakPath].path;
+  
+  NSString *modelPath = getResourcePath(@"en_US-ryan-high.onnx");
+  NSString *tokensPath = getResourcePath(@"tokens.txt");
+  
+  SherpaOnnxOfflineTtsConfig config;
+  memset(&config, 0, sizeof(config));
+  config.model.vits.model = [modelPath UTF8String];
+  config.model.vits.tokens = [tokensPath UTF8String];
+  config.model.vits.data_dir = [dataDir UTF8String];
+  
+  SherpaOnnxOfflineTts *tts = SherpaOnnxCreateOfflineTts(&config);
+  const SherpaOnnxGeneratedAudio *audio =
+  SherpaOnnxOfflineTtsGenerate(tts, "Hello world", 0, 1.0);
+  
+  NSString *tempDirectoryPath = NSTemporaryDirectory();
+  NSString *filePath = [tempDirectoryPath stringByAppendingPathComponent:@"test.wav"];
+  const char *filename = [filePath UTF8String];
+  
+  SherpaOnnxWriteWave(audio->samples, audio->n, audio->sample_rate, filename);
+
+  SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);
+  SherpaOnnxDestroyOfflineTts(tts);
+//  free((void *)filename);
+
+  return filePath;
+}
+// - (NSString *)speech {
+//     NSString *espeakPath = @"espeak-ng-data";
+//     NSBundle *bundle = [NSBundle mainBundle];
+//     NSURL *dataDirURL = [bundle.resourceURL URLByAppendingPathComponent:espeakPath];
+//     NSString *afDictPath = [dataDirURL.path stringByAppendingPathComponent:@"af_dic"];
+
+//     NSFileManager *fileManager = [NSFileManager defaultManager];
+//     if ([fileManager fileExistsAtPath:afDictPath]) {
+//         return @"yes";
+//     } else {
+//         return @"no";
+//     }
+// }
 
 @end

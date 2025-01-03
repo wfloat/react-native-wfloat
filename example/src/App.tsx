@@ -1,7 +1,7 @@
 import { Text, View, StyleSheet } from 'react-native';
-import { multiply, subtract } from 'react-native-wfloat';
+import { speech } from 'react-native-wfloat';
 
-const result = subtract(3, 7);
+const result = speech();
 
 export default function App() {
   return (
