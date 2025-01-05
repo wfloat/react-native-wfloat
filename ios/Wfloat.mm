@@ -1,4 +1,5 @@
 #import "Wfloat.h"
+#import <AVFoundation/AVFoundation.h>
 #import "sherpa-onnx.xcframework/Headers/sherpa-onnx/c-api/c-api.h"
 //#import "react_native_wfloat-Swift.h"
 
@@ -88,6 +89,17 @@ NSString *getResourcePath(NSString *filename) {
 
   return filePath;
 }
+
+- (void)playWav:(NSString *)filePath { 
+  NSURL *fileURL = [NSURL fileURLWithPath:filePath];
+  NSError *error = nil;
+  AVAudioPlayer *audioPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:fileURL error:&error];
+  if (!error) {
+      [audioPlayer play];
+  }
+}
+
+
 // - (NSString *)speech {
 //     NSString *espeakPath = @"espeak-ng-data";
 //     NSBundle *bundle = [NSBundle mainBundle];

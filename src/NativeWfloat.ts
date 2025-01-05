@@ -3,6 +3,7 @@ import { TurboModuleRegistry } from 'react-native';
 
 export interface Spec extends TurboModule {
   speech(): string;
+  playWav(filePath: string): void;
   // multiply(a: number, b: number): number;
   // subtract(a: number, b: number): number;
   // createTtsModelConfigWithModel(

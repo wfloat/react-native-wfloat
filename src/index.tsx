@@ -15,3 +15,7 @@ import Wfloat from './NativeWfloat';
 export function speech(): string {
   return Wfloat.speech();
 }
+
+export function playWav(filePath: string): void {
+  Wfloat.playWav(filePath);
+}
