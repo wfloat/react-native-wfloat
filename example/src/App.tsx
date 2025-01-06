@@ -1,18 +1,24 @@
 import { Text, View, StyleSheet, Button } from 'react-native';
 import { speech, playWav } from 'react-native-wfloat';
 
-const result = speech();
-playWav(result);
 
-const playSound = async () => {
-  playWav(result);
+const playSound = () => {
+  try {
+    const startTime = Date.now();
+    const newSound = speech();
+    const endTime = Date.now();
+    console.log(`runtime is ${endTime - startTime}ms`);
+    playWav(newSound)
+  } catch (error) {
+    console.error(error);
+  }
 };
 
 export default function App() {
   
   return (
     <View style={styles.container}>
-      <Text>Result: {result}</Text>
+      {/* <Text>Result: {result}</Text> */}
       <Button title="Play Sound" onPress={playSound} />
     </View>
   );

@@ -3,6 +3,11 @@
 #import "sherpa-onnx.xcframework/Headers/sherpa-onnx/c-api/c-api.h"
 //#import "react_native_wfloat-Swift.h"
 
+
+@interface Wfloat () <AVAudioPlayerDelegate>
+@property (strong, nonatomic) AVAudioPlayer *audioPlayer;
+@end
+
 @implementation Wfloat
 
 RCT_EXPORT_MODULE()
@@ -90,13 +95,18 @@ NSString *getResourcePath(NSString *filename) {
   return filePath;
 }
 
-- (void)playWav:(NSString *)filePath { 
-  NSURL *fileURL = [NSURL fileURLWithPath:filePath];
-  NSError *error = nil;
-  AVAudioPlayer *audioPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:fileURL error:&error];
-  if (!error) {
-      [audioPlayer play];
-  }
+- (NSString *)playWav:(NSString *)filePath {
+    if (!self.audioPlayer) {  // Initialize the player if it hasn't been already
+        NSURL *fileURL = [NSURL fileURLWithPath:filePath];
+        NSError *error = nil;
+        self.audioPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:fileURL error:&error];
+        if (error) {
+            return [error localizedDescription];
+        }
+    }
+
+    [self.audioPlayer play];
+    return @"success";
 }
 
 

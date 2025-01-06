@@ -13,9 +13,10 @@ import Wfloat from './NativeWfloat';
 // }
 
 export function speech(): string {
-  return Wfloat.speech();
+  const result = Wfloat.speech();
+  return result;
 }
 
-export function playWav(filePath: string): void {
-  Wfloat.playWav(filePath);
+export function playWav(filePath: string): string {
+  return Wfloat.playWav(filePath);
 }
