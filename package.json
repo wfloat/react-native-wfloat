@@ -1,6 +1,6 @@
 {
-  "name": "react-native-wfloat",
-  "version": "0.1.0",
+  "name": "@wfloat/react-native-wfloat",
+  "version": "0.0.2",
   "description": "Wfloat package for react native",
   "source": "./src/index.tsx",
   "main": "./lib/commonjs/index.js",
@@ -61,7 +61,7 @@
   },
   "homepage": "https://github.com/wfloat/react-native-wfloat#readme",
   "publishConfig": {
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.wfloat.com/repository/react-native-wfloat/"
   },
   "devDependencies": {
     "@commitlint/config-conventional": "^17.0.2",

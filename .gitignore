@@ -1,6 +1,7 @@
 ios/onnxruntime.xcframework/
 ios/sherpa-onnx.xcframework/
 ios/resources/
+.npmrc
 
 # OSX
 #

@@ -64,7 +64,7 @@ NSString *getResourcePath(NSString *filename) {
     return fullPath;
 }
 
-- (NSString *)speech {
+- (NSString *)speech:(NSString *)inputText {
   NSString *espeakPath = @"espeak-ng-data";
   NSBundle *bundle = [NSBundle mainBundle];
   NSString *dataDir = [bundle.resourceURL URLByAppendingPathComponent:espeakPath].path;
@@ -80,7 +80,7 @@ NSString *getResourcePath(NSString *filename) {
   
   SherpaOnnxOfflineTts *tts = SherpaOnnxCreateOfflineTts(&config);
   const SherpaOnnxGeneratedAudio *audio =
-  SherpaOnnxOfflineTtsGenerate(tts, "Hello world", 0, 1.0);
+  SherpaOnnxOfflineTtsGenerate(tts, [inputText UTF8String], 0, 1.0);
   
   NSString *tempDirectoryPath = NSTemporaryDirectory();
   NSString *filePath = [tempDirectoryPath stringByAppendingPathComponent:@"test.wav"];
