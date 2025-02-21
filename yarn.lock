@@ -3327,6 +3327,38 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@wfloat/react-native-wfloat@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "@wfloat/react-native-wfloat@workspace:."
+  dependencies:
+    "@commitlint/config-conventional": ^17.0.2
+    "@evilmartians/lefthook": ^1.5.0
+    "@react-native-community/cli": 15.0.1
+    "@react-native/eslint-config": ^0.73.1
+    "@release-it/conventional-changelog": ^9.0.2
+    "@types/jest": ^29.5.5
+    "@types/react": ^18.2.44
+    commitlint: ^17.0.2
+    del-cli: ^5.1.0
+    eslint: ^8.51.0
+    eslint-config-prettier: ^9.0.0
+    eslint-plugin-prettier: ^5.0.1
+    jest: ^29.7.0
+    prettier: ^3.0.3
+    react: 18.3.1
+    react-native: 0.76.5
+    react-native-blob-util: 0.19.9
+    react-native-builder-bob: ^0.35.2
+    release-it: ^17.10.0
+    turbo: ^1.10.7
+    typescript: ^5.2.2
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+    react-native-blob-util: "*"
+  languageName: unknown
+  linkType: soft
+
 "JSONStream@npm:^1.3.5":
   version: 1.3.5
   resolution: "JSONStream@npm:1.3.5"
@@ -3925,6 +3957,13 @@ __metadata:
   version: 1.0.2
   resolution: "balanced-match@npm:1.0.2"
   checksum: 9706c088a283058a8a99e0bf91b0a2f75497f185980d9ffa8b304de1d9e58ebda7c72c07ebf01dadedaac5b2907b2c6f566f660d62bd336c3468e960403b9d65
+  languageName: node
+  linkType: hard
+
+"base-64@npm:0.1.0":
+  version: 0.1.0
+  resolution: "base-64@npm:0.1.0"
+  checksum: 5a42938f82372ab5392cbacc85a5a78115cbbd9dbef9f7540fa47d78763a3a8bd7d598475f0d92341f66285afd377509851a9bb5c67bbecb89686e9255d5b3eb
   languageName: node
   linkType: hard
 
@@ -6478,7 +6517,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"glob@npm:^7.0.0, glob@npm:^7.1.1, glob@npm:^7.1.3, glob@npm:^7.1.4":
+"glob@npm:^7.0.0, glob@npm:^7.1.1, glob@npm:^7.1.3, glob@npm:^7.1.4, glob@npm:^7.2.3":
   version: 7.2.3
   resolution: "glob@npm:7.2.3"
   dependencies:
@@ -10576,6 +10615,32 @@ __metadata:
   languageName: node
   linkType: hard
 
+"react-native-blob-util@npm:0.19.3":
+  version: 0.19.3
+  resolution: "react-native-blob-util@npm:0.19.3"
+  dependencies:
+    base-64: 0.1.0
+    glob: ^7.2.3
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+  checksum: 6905a8a3af35d4bdc3d89a264e17a791f89a43999ab8762f6bb4a9a62c246e4d4ae4644d80f9eb0968fa5d21fa9826433fbe6110e2882f6c9bce2157c136b6fd
+  languageName: node
+  linkType: hard
+
+"react-native-blob-util@npm:0.19.9":
+  version: 0.19.9
+  resolution: "react-native-blob-util@npm:0.19.9"
+  dependencies:
+    base-64: 0.1.0
+    glob: ^10.3.10
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+  checksum: 1bb315965cabc9858f022d54da998a9d312b731f21da3e04783a593a10a41d8aa37c479b91e4deaae180b751472823ea524c4c74b3a16ed359b66a3a9e284d09
+  languageName: node
+  linkType: hard
+
 "react-native-builder-bob@npm:^0.35.2":
   version: 0.35.2
   resolution: "react-native-builder-bob@npm:0.35.2"
@@ -10623,37 +10688,8 @@ __metadata:
     "@react-native/typescript-config": 0.76.5
     react: 18.3.1
     react-native: 0.76.5
+    react-native-blob-util: 0.19.3
     react-native-builder-bob: ^0.35.2
-  languageName: unknown
-  linkType: soft
-
-"react-native-wfloat@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "react-native-wfloat@workspace:."
-  dependencies:
-    "@commitlint/config-conventional": ^17.0.2
-    "@evilmartians/lefthook": ^1.5.0
-    "@react-native-community/cli": 15.0.1
-    "@react-native/eslint-config": ^0.73.1
-    "@release-it/conventional-changelog": ^9.0.2
-    "@types/jest": ^29.5.5
-    "@types/react": ^18.2.44
-    commitlint: ^17.0.2
-    del-cli: ^5.1.0
-    eslint: ^8.51.0
-    eslint-config-prettier: ^9.0.0
-    eslint-plugin-prettier: ^5.0.1
-    jest: ^29.7.0
-    prettier: ^3.0.3
-    react: 18.3.1
-    react-native: 0.76.5
-    react-native-builder-bob: ^0.35.2
-    release-it: ^17.10.0
-    turbo: ^1.10.7
-    typescript: ^5.2.2
-  peerDependencies:
-    react: "*"
-    react-native: "*"
   languageName: unknown
   linkType: soft
 

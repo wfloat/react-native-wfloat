@@ -2,7 +2,7 @@
   "compilerOptions": {
     "rootDir": ".",
     "paths": {
-      "react-native-wfloat": ["./src/index"]
+      "@wfloat/react-native-wfloat": ["./src/index"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
