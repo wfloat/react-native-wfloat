@@ -64,17 +64,27 @@ NSString *getResourcePath(NSString *filename) {
     return fullPath;
 }
 
-- (NSString *)speech:(NSString *)inputText {
+- (NSString *)speech:(NSString *)modelPath inputText:(NSString *)inputText {
   NSString *espeakPath = @"espeak-ng-data";
   NSBundle *bundle = [NSBundle mainBundle];
   NSString *dataDir = [bundle.resourceURL URLByAppendingPathComponent:espeakPath].path;
   
-  NSString *modelPath = getResourcePath(@"en_US-ryan-high.onnx");
+//  NSString *modelPathTest = getResourcePath(@"en_US-ryan-high.onnx");
   NSString *tokensPath = getResourcePath(@"tokens.txt");
+  
+  NSString *documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+  NSString *resolvedModelPath = [documentsPath stringByAppendingPathComponent:modelPath];
+
+  if (![[NSFileManager defaultManager] fileExistsAtPath:resolvedModelPath]) {
+      NSLog(@"Model file not found at path: %@", resolvedModelPath);
+      return @"The file could not be found";
+  }
+  
+//  return modelPathTest;
   
   SherpaOnnxOfflineTtsConfig config;
   memset(&config, 0, sizeof(config));
-  config.model.vits.model = [modelPath UTF8String];
+  config.model.vits.model = [resolvedModelPath UTF8String];
   config.model.vits.tokens = [tokensPath UTF8String];
   config.model.vits.data_dir = [dataDir UTF8String];
   
@@ -108,7 +118,6 @@ NSString *getResourcePath(NSString *filename) {
     [self.audioPlayer play];
     return @"success";
 }
-
 
 // - (NSString *)speech {
 //     NSString *espeakPath = @"espeak-ng-data";

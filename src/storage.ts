@@ -5,7 +5,7 @@ export const TARGET_DIR = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/react_nati
 export const CONFIG_FILE_PATH = `${TARGET_DIR}/models_config.json`;
 let operationQueue = Promise.resolve(); // Ensures sequential execution
 
-async function readConfig(): Promise<ModelsConfig> {
+export async function readConfig(): Promise<ModelsConfig> {
     try {
         const exists = await ReactNativeBlobUtil.fs.exists(CONFIG_FILE_PATH);
         if (!exists) {
@@ -88,20 +88,29 @@ async function downloadLargeFile(url: string): Promise<FetchBlobResponse> {
     // })
 }
 
+function extractRelativePath(fullPath: string) {
+    const marker = "/Documents/";
+    const index = fullPath.indexOf(marker);
+
+    if (index === -1) {
+        throw new Error("'/Documents/' not found in the path");
+    }
+
+    return fullPath.substring(index + marker.length);
+
+};
+
 export async function loadModel(modelName: ModelName) {
     const fileRegistryLocation = "https://registry.wfloat.com/repository/files/models/"
     if (modelName === "default_male") {
         const isLoaded = await isModelLoaded("default_male")
-        if (isLoaded) {
-            console.log("model is loaded so nothing was downloaded")
-        }
         if (!isLoaded) {
             const configRes = await downloadLargeFile(`${fileRegistryLocation}/default_male.onnx.json`)
             const modelRes = await downloadLargeFile(`${fileRegistryLocation}/default_male.onnx`)
             await updateLoadedModelEntry({
                 id: "default_male",
-                configPath: configRes.path(),
-                modelPath: modelRes.path(),
+                configPath: extractRelativePath(configRes.path()),
+                modelPath: extractRelativePath(modelRes.path()),
                 version: 0,
             });
         }
@@ -130,7 +139,7 @@ export async function unloadModel(modelName: ModelName) {
 }
 
 export async function testStorage() {
-    // await unloadModel("default_male");
+    await unloadModel("default_male");
     // ReactNativeBlobUtil.fs.unlink(CONFIG_FILE_PATH)
     console.log("config here", await readConfig())
     await loadModel("default_male");
