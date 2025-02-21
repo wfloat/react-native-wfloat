@@ -16,7 +16,8 @@ const playSound = () => {
 
 const downloadVoice = async () => {
   try {
-    const modelPath = await loadModel('default_male');
+    // const modelPath = await loadModel('default_male');
+    const modelPath = await loadModel("default_male");
     console.log(modelPath);
   } catch (error) {
     console.error(error);

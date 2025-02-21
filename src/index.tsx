@@ -1,34 +1,41 @@
 import Wfloat from './NativeWfloat';
-// import ReactNativeBlobUtil from 'react-native-blob-util';
+import ReactNativeBlobUtil, { type FetchBlobResponse } from 'react-native-blob-util'
 
-// export function multiply(a: number, b: number): number {
-//   return Wfloat.multiply(a, b);
-// }
+type ModelName = "default_male"
 
-// export function subtract(a: number, b: number): number {
-//   return Wfloat.subtract(a, b);
-// }
+async function downloadLargeFile(url: string): Promise<FetchBlobResponse> {
+  const dirs = ReactNativeBlobUtil.fs.dirs
+  const targetDir = `${dirs.DocumentDir}/react_native_wfloat`;
 
-// export function testSherpaOnnx() {
-//   return Wfloat.checkIfClassExists();
-// }
+  const isDirExists = await ReactNativeBlobUtil.fs.exists(targetDir);
+  if (!isDirExists) {
+    await ReactNativeBlobUtil.fs.mkdir(targetDir);
+  }
 
-export async function loadModel(modelName: string): Promise<string> {
-  console.log(modelName);
-  return Promise.resolve("foobar poop");
-  // return ReactNativeBlobUtil
-  //   .config({
-  //     fileCache: true,  // enables file caching
-  //   })
-  //   .fetch('GET', 'https://registry.wfloat.com/repository/files/models/tempfile.txt', {
-  //     // some headers ..
-  //   })
-  //   .then((res) => {
-  //     console.log('The file saved to ', res.path());
-  //     return res.path();  // returns the file path
-  //   });
+  return ReactNativeBlobUtil
+    .config({
+      path: `${targetDir}/default_male.onnx.json`,
+      fileCache: true,  // enables file caching
+    })
+    .fetch('GET', url, {
+      // some headers ..
+    })
+  // .then((res) => {
+  //   return res;
+  // })
 }
 
+export async function loadModel(modelName: ModelName): Promise<string> {
+  const fileRegistryLocation = "https://registry.wfloat.com/repository/files/models/"
+  if (modelName === "default_male") {
+    const res = await downloadLargeFile(`${fileRegistryLocation}/default_male.onnx.json`)
+    return res.path();
+  } else if (!modelName) {
+    throw new Error("Voice modelName is required.");
+  } else {
+    throw new Error(`Invalid voice modelName: ${modelName}.`);
+  }
+}
 
 export function speech(inputText: string): string {
   const result = Wfloat.speech(inputText);
