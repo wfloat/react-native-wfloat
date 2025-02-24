@@ -33,3 +33,4 @@ MIT
 Made with [create-react-native-library](https://github.com/callstack/react-native-builder-bob)
 
 cd ~/dev/react-native-wfloat && yarn clean && yarn prepare && cd example/ios && bundle exec pod install && cd ../..
+npm publish
