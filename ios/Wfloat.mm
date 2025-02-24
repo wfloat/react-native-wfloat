@@ -93,7 +93,8 @@ NSString *getResourcePath(NSString *filename) {
   SherpaOnnxOfflineTtsGenerate(tts, [inputText UTF8String], 0, 1.0);
   
   NSString *tempDirectoryPath = NSTemporaryDirectory();
-  NSString *filePath = [tempDirectoryPath stringByAppendingPathComponent:@"test.wav"];
+  NSString *timestamp = [NSString stringWithFormat:@"%lld", (long long)[[NSDate date] timeIntervalSince1970]];
+  NSString *filePath = [tempDirectoryPath stringByAppendingPathComponent:[NSString stringWithFormat:@"audio_%@.wav", timestamp]];
   const char *filename = [filePath UTF8String];
   
   SherpaOnnxWriteWave(audio->samples, audio->n, audio->sample_rate, filename);
@@ -106,13 +107,13 @@ NSString *getResourcePath(NSString *filename) {
 }
 
 - (NSString *)playWav:(NSString *)filePath {
-    if (!self.audioPlayer) {  // Initialize the player if it hasn't been already
-        NSURL *fileURL = [NSURL fileURLWithPath:filePath];
-        NSError *error = nil;
-        self.audioPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:fileURL error:&error];
-        if (error) {
-            return [error localizedDescription];
-        }
+    NSURL *fileURL = [NSURL fileURLWithPath:filePath];
+    NSError *error = nil;
+
+    self.audioPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:fileURL error:&error];
+    
+    if (error) {
+        return [error localizedDescription];
     }
 
     [self.audioPlayer play];

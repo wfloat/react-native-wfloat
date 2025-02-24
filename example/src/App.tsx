@@ -1,19 +1,27 @@
 import { Text, View, StyleSheet, Button } from 'react-native';
-import { speech, playWav, loadModel, unloadModel } from '@wfloat/react-native-wfloat';
-
+import { speech, playWav, loadModel, unloadModel, testStorage } from '@wfloat/react-native-wfloat';
 
 const playSound = async () => {
   try {
+    const text = "Dubfloat. Realistic computer voice without subscriptions or usage based charges.";
+    const words = text.split(" ");
+    const randomLength = Math.floor(Math.random() * words.length) + 1;
+    const randomText = words.slice(0, randomLength).join(" ");
+
+    console.log("random text", randomText);
+
     const startTime = Date.now();
-    const newSound = await speech("default_male", "Dubfloat. Realistic computer voice without subscriptions or usage based charges. It runs directly in your app and it's easy to set up.");
+    const newSound = await speech("default_male", randomText);
     const endTime = Date.now();
+
     console.log(`runtime is ${endTime - startTime}ms`);
     console.log(newSound);
-    playWav(newSound)
+    playWav(newSound);
   } catch (error) {
     console.error(error);
   }
 };
+
 
 const downloadVoice = async () => {
   try {
@@ -37,6 +45,7 @@ export default function App() {
       <Button title="Play Sound" onPress={playSound} />
       <Button title="Load model" onPress={downloadVoice} />
       <Button title="Unload model" onPress={removeVoice} />
+      <Button title="Test Storage" onPress={testStorage} />
     </View>
   );
 }
