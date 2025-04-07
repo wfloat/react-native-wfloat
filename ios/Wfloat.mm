@@ -1,47 +1,29 @@
 #import "Wfloat.h"
 #import <AVFoundation/AVFoundation.h>
 #import "sherpa-onnx.xcframework/Headers/sherpa-onnx/c-api/c-api.h"
+#import "WfloatAudioStreamer.h"
 //#import "react_native_wfloat-Swift.h"
 
+// --- Global static instance for C callback ---
+static Wfloat *g_self = nil;
+
+int StreamingCallback(const float *samples, int32_t n, float /*progress*/) {
+    if (g_self && samples && n > 0) {
+      [(Wfloat *)g_self enqueueAudioSamples:samples length:n];
+    }
+    return 0;
+}
 
 @interface Wfloat () <AVAudioPlayerDelegate>
 @property (strong, nonatomic) AVAudioPlayer *audioPlayer;
+@property (strong, nonatomic) WfloatAudioStreamer *audioStreamer;
+
+- (void)enqueueAudioSamples:(const float *)samples length:(int32_t)n;
 @end
 
 @implementation Wfloat
-
 RCT_EXPORT_MODULE()
 
-// - (NSNumber *)multiply:(double)a b:(double)b {
-//     NSNumber *result = @(a * b);
-
-//     return result;
-// }
-
-// - (NSNumber *)subtract:(double)a b:(double)b {
-//     NSNumber *result = @(a - b);
-
-//     return result;
-// }
-
-// // Expose the Swift testSpeech method to React Native
-// RCT_EXPORT_METHOD(testSpeech:(NSInteger)a b:(NSInteger)b resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
-//     @try {
-//         // Call the Swift static method
-//         NSInteger result = [Wfloat testSpeechWithA:a b:b];
-//         resolve(@(result)); // Resolve the promise with the result
-//     } @catch (NSException *exception) {
-//         reject(@"testSpeech_error", exception.reason, nil); // Reject the promise with an error
-//     }
-// }
-
-//RCT_REMAP_METHOD(add, addA:(NSInteger)a
-//                        andB:(NSInteger)b
-//                withResolver:(RCTPromiseResolveBlock) resolve
-//                withRejecter:(RCTPromiseRejectBlock) reject)
-//{
-//  return [self add:a b:b resolve:resolve reject:reject];
-//}
 
 #ifdef RCT_NEW_ARCH_ENABLED
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
@@ -51,12 +33,12 @@ RCT_EXPORT_MODULE()
 }
 #endif
 
-//- (void)add:(double)a b:(double)b resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
-//  // NSNumber *result = @([Wfloat addWithA:a b:b]);
-//  double sum = a + b;
-//  NSNumber *result = [NSNumber numberWithDouble:sum];
-//  resolve(result);
-//}
+- (void)enqueueAudioSamples:(const float *)samples length:(int32_t)n {
+    NSData *pcmData = [NSData dataWithBytes:samples length:n * sizeof(float)];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.audioStreamer enqueuePCMData:pcmData];
+    });
+}
 
 NSString *getResourcePath(NSString *filename) {
     NSBundle *bundle = [NSBundle mainBundle];
@@ -120,18 +102,103 @@ NSString *getResourcePath(NSString *filename) {
     return @"success";
 }
 
-// - (NSString *)speech {
-//     NSString *espeakPath = @"espeak-ng-data";
-//     NSBundle *bundle = [NSBundle mainBundle];
-//     NSURL *dataDirURL = [bundle.resourceURL URLByAppendingPathComponent:espeakPath];
-//     NSString *afDictPath = [dataDirURL.path stringByAppendingPathComponent:@"af_dic"];
+- (void)streamSpeech:(NSString *)modelPath inputText:(NSString *)inputText resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+    g_self = self;
+  
+  NSString *espeakPath = @"espeak-ng-data";
+  NSBundle *bundle = [NSBundle mainBundle];
+  NSString *dataDir = [bundle.resourceURL URLByAppendingPathComponent:espeakPath].path;
+  
+//  NSString *modelPathTest = getResourcePath(@"en_US-ryan-high.onnx");
+  NSString *tokensPath = getResourcePath(@"tokens.txt");
+  
+  NSString *documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+  NSString *resolvedModelPath = [documentsPath stringByAppendingPathComponent:modelPath];
+  
+      if (![[NSFileManager defaultManager] fileExistsAtPath:resolvedModelPath]) {
+          reject(@"file_not_found", @"Model file not found", nil);
+      }
+  
+  SherpaOnnxOfflineTtsConfig config;
+  memset(&config, 0, sizeof(config));
+  config.model.vits.model = [resolvedModelPath UTF8String];
+  config.model.vits.tokens = [tokensPath UTF8String];
+  config.model.vits.data_dir = [dataDir UTF8String];
+  
+  SherpaOnnxOfflineTts *tts = SherpaOnnxCreateOfflineTts(&config);
+  
+      // Prepare and start audio streamer
+      if (!self.audioStreamer) {
+          self.audioStreamer = [[WfloatAudioStreamer alloc] initWithSampleRate:22050];
+      }
+      [self.audioStreamer start];
+  
+      // Start TTS with chunk callback
+      SherpaOnnxOfflineTtsGenerateWithProgressCallback(
+          tts,
+          [inputText UTF8String],
+          0,      // speaker id
+          1.0,    // speed
+          StreamingCallback
+      );
+  
+  // Use dispatch_after to delay the promise resolution
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      resolve(@"Speech synthesis completed.");
+  });
+  
+  SherpaOnnxDestroyOfflineTts(tts);
 
-//     NSFileManager *fileManager = [NSFileManager defaultManager];
-//     if ([fileManager fileExistsAtPath:afDictPath]) {
-//         return @"yes";
-//     } else {
-//         return @"no";
-//     }
-// }
+//    resolve(@"junk string placeholder");
+  
+}
+
+
+//- (void)streamSpeech:(NSString *)modelPath
+//          inputText:(NSString *)inputText
+//           resolver:(RCTPromiseResolveBlock)resolve
+//           rejecter:(RCTPromiseRejectBlock)reject
+//{
+//    g_self = self;
+//
+//    NSString *espeakPath = @"espeak-ng-data";
+//    NSBundle *bundle = [NSBundle mainBundle];
+//    NSString *dataDir = [bundle.resourceURL URLByAppendingPathComponent:espeakPath].path;
+//    NSString *tokensPath = getResourcePath(@"tokens.txt");
+//
+//    NSString *documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+//    NSString *resolvedModelPath = [documentsPath stringByAppendingPathComponent:modelPath];
+//
+////    if (![[NSFileManager defaultManager] fileExistsAtPath:resolvedModelPath]) {
+////        reject(@"file_not_found", @"Model file not found", nil);
+////        return;
+////    }
+//
+//    SherpaOnnxOfflineTtsConfig config;
+//    memset(&config, 0, sizeof(config));
+//    config.model.vits.model = [resolvedModelPath UTF8String];
+//    config.model.vits.tokens = [tokensPath UTF8String];
+//    config.model.vits.data_dir = [dataDir UTF8String];
+//
+//    SherpaOnnxOfflineTts *tts = SherpaOnnxCreateOfflineTts(&config);
+//
+//    // Prepare and start audio streamer
+//    if (!self.audioStreamer) {
+//        self.audioStreamer = [[WfloatAudioStreamer alloc] initWithSampleRate:16000];
+//    }
+//    [self.audioStreamer start];
+//
+//    // Start TTS with chunk callback
+//    SherpaOnnxOfflineTtsGenerateWithProgressCallback(
+//        tts,
+//        [inputText UTF8String],
+//        0,      // speaker id
+//        1.0,    // speed
+//        StreamingCallback
+//    );
+//
+//    SherpaOnnxDestroyOfflineTts(tts);
+//    resolve(@"streaming_started");
+//}
 
 @end

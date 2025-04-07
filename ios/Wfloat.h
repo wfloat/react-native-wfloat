@@ -12,4 +12,6 @@
 
 #endif
 
+- (void)enqueueAudioSamples:(const float *)samples length:(int32_t)n;
+
 @end

@@ -3,6 +3,12 @@ import { TurboModuleRegistry } from 'react-native';
 
 export interface Spec extends TurboModule {
   speech(modelPath: string, inputText: string): string;
+  //   - (void)streamSpeech:(NSString *)modelPath
+  //           inputText:(NSString *)inputText
+  //            resolver:(RCTPromiseResolveBlock)resolve
+  //            rejecter:(RCTPromiseRejectBlock)reject
+  // {
+  streamSpeech(modelPath: string, inputText: string): Promise<string>;
   playWav(filePath: string): string;
   // multiply(a: number, b: number): number;
   // subtract(a: number, b: number): number;

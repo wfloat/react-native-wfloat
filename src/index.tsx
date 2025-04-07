@@ -15,6 +15,17 @@ export async function speech(modelName: ModelName, inputText: string): Promise<s
   return result;
 }
 
+export async function streamSpeech(modelName: ModelName, inputText: string): Promise<string> {
+  const config = await readConfig()
+  const modelEntry = config.models[modelName];
+  if (!modelEntry) {
+    throw new Error(`Voice model "${modelName}" is not loaded on the device. To load the voice, add function call: loadModel("${modelName}")`);
+  }
+  const result = Wfloat.streamSpeech(modelEntry.modelPath, inputText);
+  // return "fake success on stream";
+  return result;
+}
+
 export function playWav(filePath: string): string {
   return Wfloat.playWav(filePath);
 }
