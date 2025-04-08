@@ -7,16 +7,20 @@
 // --- Global static instance for C callback ---
 static Wfloat *g_self = nil;
 
-int StreamingCallback(const float *samples, int32_t n, float /*progress*/) {
+int StreamingCallback(const float *samples, int32_t n, float p) {
+  printf("Progress: %.2f, Num Samples: %d\n", p, n);
     if (g_self && samples && n > 0) {
       [(Wfloat *)g_self enqueueAudioSamples:samples length:n];
     }
-    return 0;
+    return 1;
 }
 
 @interface Wfloat () <AVAudioPlayerDelegate>
 @property (strong, nonatomic) AVAudioPlayer *audioPlayer;
 @property (strong, nonatomic) WfloatAudioStreamer *audioStreamer;
+//@property (nonatomic) SherpaOnnxOfflineTts *tts;
+@property (nonatomic, assign) SherpaOnnxOfflineTts *tts;
+@property (nonatomic, copy) NSString *loadedModelPath;
 
 - (void)enqueueAudioSamples:(const float *)samples length:(int32_t)n;
 @end
@@ -32,6 +36,42 @@ RCT_EXPORT_MODULE()
     return std::make_shared<facebook::react::NativeWfloatSpecJSI>(params);
 }
 #endif
+
+- (void)dealloc {
+    if (self.tts) {
+        SherpaOnnxDestroyOfflineTts(self.tts);
+        self.tts = nil;
+    }
+}
+
+- (BOOL)loadModelIfNeeded:(NSString *)modelPath tokensPath:(NSString *)tokensPath dataDir:(NSString *)dataDir error:(NSError **)error {
+//    if (self.tts && [self.loadedModelPath isEqualToString:modelPath]) {
+  if (self.tts) {
+        return YES; // Already loaded
+    }
+
+//    if (self.tts) {
+//        SherpaOnnxDestroyOfflineTts(self.tts);
+//        self.tts = nil;
+//    }
+
+    SherpaOnnxOfflineTtsConfig config;
+    memset(&config, 0, sizeof(config));
+    config.model.vits.model = [modelPath UTF8String];
+    config.model.vits.tokens = [tokensPath UTF8String];
+    config.model.vits.data_dir = [dataDir UTF8String];
+
+    self.tts = SherpaOnnxCreateOfflineTts(&config);
+    if (!self.tts) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"WfloatErrorDomain" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Failed to initialize TTS model"}];
+        }
+        return NO;
+    }
+
+    self.loadedModelPath = modelPath;
+    return YES;
+}
 
 - (void)enqueueAudioSamples:(const float *)samples length:(int32_t)n {
     NSData *pcmData = [NSData dataWithBytes:samples length:n * sizeof(float)];
@@ -50,10 +90,7 @@ NSString *getResourcePath(NSString *filename) {
   NSString *espeakPath = @"espeak-ng-data";
   NSBundle *bundle = [NSBundle mainBundle];
   NSString *dataDir = [bundle.resourceURL URLByAppendingPathComponent:espeakPath].path;
-  
-//  NSString *modelPathTest = getResourcePath(@"en_US-ryan-high.onnx");
   NSString *tokensPath = getResourcePath(@"tokens.txt");
-  
   NSString *documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
   NSString *resolvedModelPath = [documentsPath stringByAppendingPathComponent:modelPath];
 
@@ -61,18 +98,13 @@ NSString *getResourcePath(NSString *filename) {
       NSLog(@"Model file not found at path: %@", resolvedModelPath);
       return @"The file could not be found";
   }
-  
-//  return modelPathTest;
-  
-  SherpaOnnxOfflineTtsConfig config;
-  memset(&config, 0, sizeof(config));
-  config.model.vits.model = [resolvedModelPath UTF8String];
-  config.model.vits.tokens = [tokensPath UTF8String];
-  config.model.vits.data_dir = [dataDir UTF8String];
-  
-  SherpaOnnxOfflineTts *tts = SherpaOnnxCreateOfflineTts(&config);
+
+  NSError *loadError = nil;
+  if (![self loadModelIfNeeded:resolvedModelPath tokensPath:tokensPath dataDir:dataDir error:&loadError]) {
+      return loadError.localizedDescription;
+  }
   const SherpaOnnxGeneratedAudio *audio =
-  SherpaOnnxOfflineTtsGenerate(tts, [inputText UTF8String], 0, 1.0);
+  SherpaOnnxOfflineTtsGenerate(self.tts, [inputText UTF8String], 0, 1.0);
   
   NSString *tempDirectoryPath = NSTemporaryDirectory();
   NSString *timestamp = [NSString stringWithFormat:@"%lld", (long long)[[NSDate date] timeIntervalSince1970]];
@@ -82,7 +114,7 @@ NSString *getResourcePath(NSString *filename) {
   SherpaOnnxWriteWave(audio->samples, audio->n, audio->sample_rate, filename);
 
   SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);
-  SherpaOnnxDestroyOfflineTts(tts);
+//  SherpaOnnxDestroyOfflineTts(tts);
 //  free((void *)filename);
 
   return filePath;
@@ -102,103 +134,51 @@ NSString *getResourcePath(NSString *filename) {
     return @"success";
 }
 
-- (void)streamSpeech:(NSString *)modelPath inputText:(NSString *)inputText resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+- (NSString *)streamSpeech:(NSString *)modelPath inputText:(NSString *)inputText resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
     g_self = self;
-  
-  NSString *espeakPath = @"espeak-ng-data";
-  NSBundle *bundle = [NSBundle mainBundle];
-  NSString *dataDir = [bundle.resourceURL URLByAppendingPathComponent:espeakPath].path;
-  
-//  NSString *modelPathTest = getResourcePath(@"en_US-ryan-high.onnx");
-  NSString *tokensPath = getResourcePath(@"tokens.txt");
-  
-  NSString *documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-  NSString *resolvedModelPath = [documentsPath stringByAppendingPathComponent:modelPath];
-  
-      if (![[NSFileManager defaultManager] fileExistsAtPath:resolvedModelPath]) {
-          reject(@"file_not_found", @"Model file not found", nil);
-      }
-  
-  SherpaOnnxOfflineTtsConfig config;
-  memset(&config, 0, sizeof(config));
-  config.model.vits.model = [resolvedModelPath UTF8String];
-  config.model.vits.tokens = [tokensPath UTF8String];
-  config.model.vits.data_dir = [dataDir UTF8String];
-  
-  SherpaOnnxOfflineTts *tts = SherpaOnnxCreateOfflineTts(&config);
-  
-      // Prepare and start audio streamer
-      if (!self.audioStreamer) {
-          self.audioStreamer = [[WfloatAudioStreamer alloc] initWithSampleRate:22050];
-      }
-      [self.audioStreamer start];
-  
-      // Start TTS with chunk callback
-      SherpaOnnxOfflineTtsGenerateWithProgressCallback(
-          tts,
-          [inputText UTF8String],
-          0,      // speaker id
-          1.0,    // speed
-          StreamingCallback
-      );
-  
-  // Use dispatch_after to delay the promise resolution
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-      resolve(@"Speech synthesis completed.");
-  });
-  
-  SherpaOnnxDestroyOfflineTts(tts);
 
-//    resolve(@"junk string placeholder");
+    NSString *espeakPath = @"espeak-ng-data";
+    NSBundle *bundle = [NSBundle mainBundle];
+    NSString *dataDir = [bundle.resourceURL URLByAppendingPathComponent:espeakPath].path;
+    NSString *tokensPath = getResourcePath(@"tokens.txt");
+    NSString *documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    NSString *resolvedModelPath = [documentsPath stringByAppendingPathComponent:modelPath];
+
+    if (![[NSFileManager defaultManager] fileExistsAtPath:resolvedModelPath]) {
+        reject(@"file_not_found", @"Model file not found", nil);
+        return @"Model not found";
+    }
+
+    NSError *loadError = nil;
+    if (![self loadModelIfNeeded:resolvedModelPath tokensPath:tokensPath dataDir:dataDir error:&loadError]) {
+        reject(@"load_failed", loadError.localizedDescription, nil);
+      return @"Failed to load the tts model";
+    }
+
+    if (!self.audioStreamer) {
+      // TODO: use SherpaOnnxOfflineTtsSampleRate
+        self.audioStreamer = [[WfloatAudioStreamer alloc] initWithSampleRate:22050];
+    }
+    [self.audioStreamer start];
+
+  const SherpaOnnxGeneratedAudio *audio = SherpaOnnxOfflineTtsGenerateWithProgressCallback(
+        self.tts,
+        [inputText UTF8String],
+        0,      // speaker id
+        1.0,    // speed
+        StreamingCallback
+    );
   
+  NSString *tempDirectoryPath = NSTemporaryDirectory();
+  NSString *timestamp = [NSString stringWithFormat:@"%lld", (long long)[[NSDate date] timeIntervalSince1970]];
+  NSString *filePath = [tempDirectoryPath stringByAppendingPathComponent:[NSString stringWithFormat:@"audio_%@.wav", timestamp]];
+  const char *filename = [filePath UTF8String];
+  
+  SherpaOnnxWriteWave(audio->samples, audio->n, audio->sample_rate, filename);
+  SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);
+  printf("hello there I am at the end of the stream function. File saved at: %s\n", filename);
+  return filePath;
 }
 
-
-//- (void)streamSpeech:(NSString *)modelPath
-//          inputText:(NSString *)inputText
-//           resolver:(RCTPromiseResolveBlock)resolve
-//           rejecter:(RCTPromiseRejectBlock)reject
-//{
-//    g_self = self;
-//
-//    NSString *espeakPath = @"espeak-ng-data";
-//    NSBundle *bundle = [NSBundle mainBundle];
-//    NSString *dataDir = [bundle.resourceURL URLByAppendingPathComponent:espeakPath].path;
-//    NSString *tokensPath = getResourcePath(@"tokens.txt");
-//
-//    NSString *documentsPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-//    NSString *resolvedModelPath = [documentsPath stringByAppendingPathComponent:modelPath];
-//
-////    if (![[NSFileManager defaultManager] fileExistsAtPath:resolvedModelPath]) {
-////        reject(@"file_not_found", @"Model file not found", nil);
-////        return;
-////    }
-//
-//    SherpaOnnxOfflineTtsConfig config;
-//    memset(&config, 0, sizeof(config));
-//    config.model.vits.model = [resolvedModelPath UTF8String];
-//    config.model.vits.tokens = [tokensPath UTF8String];
-//    config.model.vits.data_dir = [dataDir UTF8String];
-//
-//    SherpaOnnxOfflineTts *tts = SherpaOnnxCreateOfflineTts(&config);
-//
-//    // Prepare and start audio streamer
-//    if (!self.audioStreamer) {
-//        self.audioStreamer = [[WfloatAudioStreamer alloc] initWithSampleRate:16000];
-//    }
-//    [self.audioStreamer start];
-//
-//    // Start TTS with chunk callback
-//    SherpaOnnxOfflineTtsGenerateWithProgressCallback(
-//        tts,
-//        [inputText UTF8String],
-//        0,      // speaker id
-//        1.0,    // speed
-//        StreamingCallback
-//    );
-//
-//    SherpaOnnxDestroyOfflineTts(tts);
-//    resolve(@"streaming_started");
-//}
 
 @end
