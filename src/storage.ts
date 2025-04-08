@@ -124,13 +124,13 @@ function extractRelativePath(fullPath: string) {
 
 export async function loadModel(modelName: ModelName) {
     const fileRegistryLocation = "https://registry.wfloat.com/repository/files/models/"
-    if (modelName === "default_male") {
-        const isLoaded = await isModelLoaded("default_male")
+    if (modelName === "default_male" || modelName === "en_US-ryan-medium") {
+        const isLoaded = await isModelLoaded(modelName)
         if (!isLoaded) {
-            const configRes = await downloadLargeFile(`${fileRegistryLocation}/default_male.onnx.json`)
-            const modelRes = await downloadLargeFile(`${fileRegistryLocation}/default_male.onnx`)
+            const configRes = await downloadLargeFile(`${fileRegistryLocation}/${modelName}.onnx.json`)
+            const modelRes = await downloadLargeFile(`${fileRegistryLocation}/${modelName}.onnx`)
             await updateLoadedModelEntry({
-                id: "default_male",
+                id: modelName,
                 configPath: extractRelativePath(configRes.path()),
                 modelPath: extractRelativePath(modelRes.path()),
                 version: 0,
@@ -144,14 +144,14 @@ export async function loadModel(modelName: ModelName) {
 }
 
 export async function unloadModel(modelName: ModelName) {
-    if (modelName === "default_male") {
-        const isLoaded = await isModelLoaded("default_male")
+    if (modelName === "default_male" || modelName === "en_US-ryan-medium") {
+        const isLoaded = await isModelLoaded(modelName)
         if (isLoaded) {
             const config = await readConfig();
             const modelConfigEntry = config.models[modelName]!;
             ReactNativeBlobUtil.fs.unlink(modelConfigEntry.configPath)
             ReactNativeBlobUtil.fs.unlink(modelConfigEntry.modelPath)
-            await removeLoadedModelEntry("default_male")
+            await removeLoadedModelEntry(modelName)
         }
     } else if (!modelName) {
         throw new Error("Voice modelName is required.");

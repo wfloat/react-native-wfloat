@@ -1,7 +1,7 @@
 import Wfloat from './NativeWfloat';
 import { enforceAudioOutputLimit, PushAudioOutput, readConfig } from './storage';
 
-export type ModelName = "default_male"
+export type ModelName = "default_male" | "en_US-ryan-medium"
 
 export async function speech(modelName: ModelName, inputText: string): Promise<string> {
   const config = await readConfig()
