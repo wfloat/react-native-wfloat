@@ -17,7 +17,7 @@ const playSound = async () => {
 
     console.log(`runtime is ${endTime - startTime}ms`);
     console.log(newSound);
-    playWav(newSound);
+    // playWav(newSound);
   } catch (error) {
     console.error(error);
   }
@@ -69,7 +69,7 @@ export default function App() {
   return (
     <View style={styles.container}>
       {/* <Text>Result: {result}</Text> */}
-      <Button title="Stream speech" onPress={streamAudio} />
+      <Button title="Stream speech aaa" onPress={streamAudio} />
       <Button title="Play Sound" onPress={playSound} />
       <Button title="Load model" onPress={downloadVoice} />
       <Button title="Unload model" onPress={removeVoice} />

@@ -1,6 +1,11 @@
 ios/onnxruntime.xcframework/
 ios/sherpa-onnx.xcframework/
 ios/resources/
+android/src/main/jniLibs/arm64-v8a/libonnxruntime.so
+android/src/main/jniLibs/arm64-v8a/libsherpa-onnx-jni.so
+android/src/main/jniLibs/x86_64/libonnxruntime.so
+android/src/main/jniLibs/x86_64/libsherpa-onnx-jni.so
+android/src/main/assets
 .npmrc
 
 # OSX
