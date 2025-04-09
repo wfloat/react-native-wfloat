@@ -1,4 +1,5 @@
 import ReactNativeBlobUtil, { type FetchBlobResponse } from 'react-native-blob-util';
+import { Platform } from 'react-native';
 import type { ModelName } from '.';
 
 export const TARGET_DIR = `${ReactNativeBlobUtil.fs.dirs.DocumentDir}/react_native_wfloat`;
@@ -111,11 +112,11 @@ async function downloadLargeFile(url: string): Promise<FetchBlobResponse> {
 }
 
 function extractRelativePath(fullPath: string) {
-    const marker = "/Documents/";
+    const marker = Platform.OS === 'ios' ? '/Documents/' : '/files/';
     const index = fullPath.indexOf(marker);
 
     if (index === -1) {
-        throw new Error("'/Documents/' not found in the path");
+        throw new Error(`'${marker}' not found in the path`);
     }
 
     return fullPath.substring(index + marker.length);

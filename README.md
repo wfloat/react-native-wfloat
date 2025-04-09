@@ -34,3 +34,5 @@ Made with [create-react-native-library](https://github.com/callstack/react-nativ
 
 cd ~/dev/react-native-wfloat && yarn clean && yarn prepare && cd example/ios && bundle exec pod install && cd ../..
 npm publish
+
+cd ~/dev/wfloat/packages/react-native-wfloat && yarn clean && yarn prepare && cd example/android && ./gradlew generateCodegenArtifactsFromSchema && cd ../..
