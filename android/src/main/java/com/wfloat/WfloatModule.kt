@@ -20,6 +20,7 @@ import android.media.MediaPlayer
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import java.util.concurrent.LinkedBlockingQueue
 
 @ReactModule(name = WfloatModule.NAME)
 class WfloatModule(reactContext: ReactApplicationContext) :
@@ -199,19 +200,32 @@ class WfloatModule(reactContext: ReactApplicationContext) :
         .setTransferMode(AudioTrack.MODE_STREAM)
         .build()
 
-      audioTrack.play()
+      val audioQueue = LinkedBlockingQueue<FloatArray>()
+
+      val writerThread = Thread {
+        audioTrack.play()
+        while (true) {
+          val samples = audioQueue.take() // blocks until data is available
+          if (samples.isEmpty()) break // poison pill to stop
+          audioTrack.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
+        }
+      }
+      writerThread.start()
 
       val audio = tts.generateWithCallback(
         text = inputText,
         sid = 0,
         speed = 1.0f,
         callback = { samples: FloatArray ->
-          audioTrack.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
+          audioQueue.put(samples)
           1
         }
       )
 
-      // Prepare output file
+      // After generation is done, signal the writer thread to stop
+      audioQueue.put(FloatArray(0))
+      writerThread.join()
+
       val tempDirPath = reactApplicationContext.cacheDir.absolutePath
       val timestamp = (System.currentTimeMillis() / 1000).toString()
       val filePath = "$tempDirPath/audio_$timestamp.wav"
