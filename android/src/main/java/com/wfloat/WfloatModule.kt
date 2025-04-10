@@ -17,6 +17,9 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import android.media.MediaPlayer
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 
 @ReactModule(name = WfloatModule.NAME)
 class WfloatModule(reactContext: ReactApplicationContext) :
@@ -151,7 +154,79 @@ class WfloatModule(reactContext: ReactApplicationContext) :
   }
 
   override fun streamSpeech(modelPath: String, inputText: String, promise: Promise) {
-    promise.resolve("stub")
+    try {
+      val paths = copyAssetsToFilesDir(reactApplicationContext)
+      val espeakDirPath = paths["espeakDirPath"]!!
+      val tokensFilePath = paths["tokensFilePath"]!!
+
+      val fullModelPath = File(reactApplicationContext.filesDir, modelPath).absolutePath
+      val fullModelFile = File(fullModelPath)
+
+      val config = OfflineTtsConfig(
+        model = OfflineTtsModelConfig(
+          vits = OfflineTtsVitsModelConfig(
+            model = fullModelPath,
+            tokens = tokensFilePath,
+            dataDir = espeakDirPath
+          )
+        )
+      )
+
+      val tts = OfflineTts(config = config)
+
+      val sampleRate = tts.sampleRate()
+      val bufferSize = AudioTrack.getMinBufferSize(
+        sampleRate,
+        AudioFormat.CHANNEL_OUT_MONO,
+        AudioFormat.ENCODING_PCM_FLOAT
+      )
+
+      val audioTrack = AudioTrack.Builder()
+        .setAudioAttributes(
+          AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+        )
+        .setAudioFormat(
+          AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+            .setSampleRate(sampleRate)
+            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+            .build()
+        )
+        .setBufferSizeInBytes(bufferSize)
+        .setTransferMode(AudioTrack.MODE_STREAM)
+        .build()
+
+      audioTrack.play()
+
+      val audio = tts.generateWithCallback(
+        text = inputText,
+        sid = 0,
+        speed = 1.0f,
+        callback = { samples: FloatArray ->
+          audioTrack.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
+          1
+        }
+      )
+
+      // Prepare output file
+      val tempDirPath = reactApplicationContext.cacheDir.absolutePath
+      val timestamp = (System.currentTimeMillis() / 1000).toString()
+      val filePath = "$tempDirPath/audio_$timestamp.wav"
+
+      audio.save(filename = filePath)
+
+      tts.free()
+      audioTrack.stop()
+      audioTrack.release()
+
+      promise.resolve(filePath)
+    } catch (e: Exception) {
+      Log.e(NAME, "streamSpeech failed", e)
+      promise.reject("STREAM_ERROR", "Failed to stream speech", e)
+    }
   }
 
   override fun playWav(filePath: String): String {
