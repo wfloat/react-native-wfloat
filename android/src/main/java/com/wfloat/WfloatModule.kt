@@ -16,6 +16,7 @@ import android.content.Context
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import android.media.MediaPlayer
 
 @ReactModule(name = WfloatModule.NAME)
 class WfloatModule(reactContext: ReactApplicationContext) :
@@ -29,21 +30,21 @@ class WfloatModule(reactContext: ReactApplicationContext) :
     val assets = assetManager.list(assetDir) ?: return
     targetDir.mkdirs()
     for (asset in assets) {
-        val path = "$assetDir/$asset"
-        val file = File(targetDir, asset)
-        if (assetManager.list(path)?.isNotEmpty() == true) {
-            copyDir(assetManager, path, file)
-        } else {
-            assetManager.open(path).use { input: InputStream ->
-                FileOutputStream(file).use { output: OutputStream ->
-                    input.copyTo(output)
-                }
-            }
+      val path = "$assetDir/$asset"
+      val file = File(targetDir, asset)
+      if (assetManager.list(path)?.isNotEmpty() == true) {
+        copyDir(assetManager, path, file)
+      } else {
+        assetManager.open(path).use { input: InputStream ->
+          FileOutputStream(file).use { output: OutputStream ->
+            input.copyTo(output)
+          }
         }
+      }
     }
   }
 
-  fun copyAssetsToFilesDir(context: Context): Map<String, String> {
+  private fun copyAssetsToFilesDir(context: Context): Map<String, String> {
     val assetManager = context.assets
     val filesDir = context.filesDir
 
@@ -52,22 +53,22 @@ class WfloatModule(reactContext: ReactApplicationContext) :
 
     val tokensTarget = File(filesDir, "tokens.txt")
     assetManager.open("tokens.txt").use { input: InputStream ->
-        FileOutputStream(tokensTarget).use { output: OutputStream ->
-            input.copyTo(output)
-        }
+      FileOutputStream(tokensTarget).use { output: OutputStream ->
+        input.copyTo(output)
+      }
     }
 
     return mapOf(
-        "espeakDirPath" to espeakTarget.absolutePath,
-        "tokensFilePath" to tokensTarget.absolutePath
+      "espeakDirPath" to espeakTarget.absolutePath,
+      "tokensFilePath" to tokensTarget.absolutePath
     )
   }
 
   override fun speech(modelPath: String, inputText: String): String {
 
     val paths = copyAssetsToFilesDir(reactApplicationContext)
-    val espeakDirPath = paths["espeakDirPath"]
-    val tokensFilePath = paths["tokensFilePath"]
+    val espeakDirPath = paths["espeakDirPath"]!!
+    val tokensFilePath = paths["tokensFilePath"]!!
 
     val fullModelPath = File(reactApplicationContext.filesDir, modelPath).absolutePath
     val fullModelFile = File(fullModelPath)
@@ -75,45 +76,77 @@ class WfloatModule(reactContext: ReactApplicationContext) :
     val modelName = fullModelFile.name
 
     // Minimal dummy config — values can be empty since we just want to load JNI
-      // val config = OfflineTtsVitsModelConfig(
-      //       model = fullModelPath,
-      //       tokens = tokensFilePath!!,
-      //       dataDir = espeakDirPath!!,
-      //   )
+    // val config = OfflineTtsVitsModelConfig(
+    //       model = fullModelPath,
+    //       tokens = tokensFilePath!!,
+    //       dataDir = espeakDirPath!!,
+    //   )
 
-      val config = getOfflineTtsConfig(
-            modelDir = modelDirPath!!,
-            modelName = modelName,
-            acousticModelName = "",
-            vocoder = "",
-            voices = "",
-            lexicon = "",
-            dataDir = espeakDirPath!!,
-            dictDir = "",
-            ruleFsts = "",
-            ruleFars = "",
-        )!!
+//     val config = getOfflineTtsConfig(
+//           modelDir = modelDirPath!!,
+//           modelName = modelName,
+//           acousticModelName = "",
+//           vocoder = "",
+//           voices = "",
+//           lexicon = "",
+//           dataDir = espeakDirPath!!,
+//           dictDir = "",
+//           ruleFsts = "",
+//           ruleFars = "",
+//       )
 
     var assets = reactApplicationContext.assets
 
-    val modelDir = File(modelDirPath!!)
-    val dataDir = File(espeakDirPath!!)
-    // val modelNameFile = File(modelName)
-
-    val existenceReport = """
-    modelDir: ${modelDir.exists()}
-    fullModelFile: ${fullModelFile.exists()}
-    espeakDirPath: ${File(espeakDirPath).isDirectory()}
-    tokensFilePath: ${File(tokensFilePath).exists()}
-
-""".trimIndent()
+//    val modelDir = File(modelDirPath)
+//    val dataDir = File(espeakDirPath)
+//    // val modelNameFile = File(modelName)
+//
+//    val existenceReport = """
+//    modelDir: ${modelDir.exists()}
+//    fullModelFile: ${fullModelFile.exists()}
+//    espeakDirPath: ${File(espeakDirPath).isDirectory()}
+//
+//""".trimIndent()
 
     // return existenceReport
 
-    // val tts = OfflineTts(assetManager = assets, config = config)
-    // val audio = tts.generate(text = inputText)
+//     val tts =
+//       val tts = OfflineTts(config = config)
 
+    // val config = OfflineTtsConfig(
+    //   model = OfflineTtsVitsModelConfig(
+    //     model = fullModelPath,  // should be the asset file name, e.g., "model.onnx"
+    //     tokens = tokensFilePath!!,
+    //     dataDir = espeakDirPath!!
+    //   )
+    // )
+
+    val config = OfflineTtsConfig(
+      model = OfflineTtsModelConfig(
+        vits = OfflineTtsVitsModelConfig(
+          model = fullModelPath,
+          tokens = tokensFilePath,
+          dataDir = espeakDirPath
+        )
+      )
+    )
+    val tts = OfflineTts(config = config)
+
+    val audio = tts.generate(
+      text = inputText,
+      sid = 0,
+      speed = 1.0f
+    )
+
+    val tempDirPath = reactApplicationContext.cacheDir.absolutePath
+    val timestamp = (System.currentTimeMillis() / 1000).toString()
+    val filePath = "$tempDirPath/audio_$timestamp.wav"
+
+//    val filename = "audio.wav"
+    val result = audio.save(filename = filePath)
     tts.free()
+
+    return filePath
     // return "${espeakDirPath};${tokensFilePath};${modelName};${modelDirPath}" // This will crash if JNI isn't properly loaded
   }
 
@@ -122,7 +155,19 @@ class WfloatModule(reactContext: ReactApplicationContext) :
   }
 
   override fun playWav(filePath: String): String {
-    return "stub"
+
+//    val assetFileDescriptor = reactApplicationContext.assets.openFd("speaker_0.wav")
+//
+    val mediaPlayer = MediaPlayer()
+    mediaPlayer.setDataSource(filePath)
+//    mediaPlayer.setDataSource(
+//      assetFileDescriptor.fileDescriptor,
+//      assetFileDescriptor.startOffset,
+//      assetFileDescriptor.length
+//    )
+    mediaPlayer.prepare()
+    mediaPlayer.start()
+    return "success"
   }
 
   companion object {
