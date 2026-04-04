@@ -1,130 +1,228 @@
 # Contributing
 
-Contributions are always welcome, no matter how large or small!
+Thanks for contributing to `@wfloat/react-native-wfloat`.
 
-We want this community to be friendly and respectful to each other. Please follow it in all your interactions with the project. Before contributing, please read the [code of conduct](./CODE_OF_CONDUCT.md).
+This repository is a React Native library package with a local example app used to exercise the library during development.
 
-## Development workflow
+Before contributing, please read the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
-This project is a monorepo managed using [Yarn workspaces](https://yarnpkg.com/features/workspaces). It contains the following packages:
+## Repository structure
 
-- The library package in the root directory.
-- An example app in the `example/` directory.
+- The package itself lives at the repository root.
+- The example app lives in [`example/`](./example) and is used to run the package on iOS and Android during local development.
 
-To get started with the project, run `yarn` in the root directory to install the required dependencies for each package:
+The root package is the main thing you are developing. The example app is a harness for validating package changes in a real React Native app.
+
+## Getting started
+
+Install dependencies from the repository root:
 
 ```sh
 yarn
 ```
 
-> Since the project relies on Yarn workspaces, you cannot use [`npm`](https://github.com/npm/cli) for development.
+This repo uses Yarn workspaces. Use Yarn for development commands.
 
-The [example app](/example/) demonstrates usage of the library. You need to run it to test any changes you make.
+## Development model
 
-It is configured to use the local version of the library, so any changes you make to the library's source code will be reflected in the example app. Changes to the library's JavaScript code will be reflected in the example app without a rebuild, but native code changes will require a rebuild of the example app.
+Most code changes happen in the package at the repository root:
 
-If you want to use Android Studio or XCode to edit the native code, you can open the `example/android` or `example/ios` directories respectively in those editors. To edit the Objective-C or Swift files, open `example/ios/WfloatExample.xcworkspace` in XCode and find the source files at `Pods > Development Pods > react-native-wfloat`.
+- JavaScript and TypeScript source lives in [`src/`](./src).
+- iOS native code lives in [`ios/`](./ios).
+- Android native code lives in [`android/`](./android).
+- Generated package output is written to [`lib/`](./lib) by the build step.
 
-To edit the Java or Kotlin files, open `example/android` in Android studio and find the source files at `react-native-wfloat` under `Android`.
+The example app in [`example/`](./example) is how you run and verify the package while you work.
 
-You can use various commands from the root directory to work with the project.
+## Core commands
 
-To start the packager:
+From the repository root:
+
+```sh
+yarn typecheck
+yarn lint
+yarn test
+yarn prepare
+```
+
+What these do:
+
+- `yarn typecheck` runs TypeScript checks.
+- `yarn lint` runs ESLint.
+- `yarn test` runs Jest tests.
+- `yarn prepare` runs `bob build` and regenerates the package build output.
+
+## When to run `yarn prepare`
+
+Run `yarn prepare` from the repository root when you change package code that should be rebuilt into distributable output, especially:
+
+- files in `src/`
+- exported package APIs
+- codegen-related package definitions
+- package build output before publishing
+
+Broadly, `yarn prepare` is the package build step for this repository.
+
+## Working with the example app
+
+You can run the example app either from the root with the workspace script or from inside `example/`.
+
+From the repository root:
 
 ```sh
 yarn example start
+yarn example ios
+yarn example android
 ```
 
-To run the example app on Android:
+Equivalent commands from `example/`:
+
+```sh
+yarn start
+yarn ios
+yarn android
+```
+
+## Typical development workflows
+
+### JavaScript or TypeScript package changes
+
+1. Edit package code in the repository root.
+2. Start Metro for the example app.
+3. Run the example app on iOS or Android.
+4. Run `yarn prepare` if you need refreshed built package output.
+
+Typical commands:
+
+```sh
+yarn example start
+yarn example ios
+```
+
+or
+
+```sh
+yarn example start
+yarn example android
+```
+
+### iOS native changes
+
+If you change iOS native code or iOS dependency state:
+
+1. Make the package change in the repository root.
+2. Run `yarn prepare` if the package build or codegen output needs to be refreshed.
+3. Install pods from `example/ios`.
+4. Run the example app on iOS.
+
+Typical commands:
+
+```sh
+yarn prepare
+cd example/ios
+bundle exec pod install
+cd ../..
+yarn example ios
+```
+
+Notes:
+
+- Use Bundler for CocoaPods commands.
+- Run React Native doctor for this repo from `example/`, not from the repository root.
+
+Example:
+
+```sh
+cd example
+npx react-native doctor
+```
+
+### Android native changes
+
+If you change Android native code or Android build configuration:
+
+1. Make the package change in the repository root.
+2. Run `yarn prepare` if the package build or codegen output needs to be refreshed.
+3. Run the example app on Android.
+
+Typical commands:
+
+```sh
+yarn prepare
+yarn example android
+```
+
+If you need Android codegen artifacts explicitly:
+
+```sh
+cd example/android
+./gradlew generateCodegenArtifactsFromSchema
+cd ../..
+```
+
+## Tooling notes
+
+- CocoaPods and the iOS Ruby toolchain are configured from [`example/Gemfile`](./example/Gemfile).
+- The example app links to the package in the repository root.
+- Metro is configured so the example app can develop against the local package source.
+
+## Quality checks
+
+Before opening a pull request, run:
+
+```sh
+yarn typecheck
+yarn lint
+yarn test
+```
+
+If your change affects package build output or native integration, also run:
+
+```sh
+yarn prepare
+```
+
+If your change affects iOS, also verify:
+
+```sh
+cd example/ios
+bundle exec pod install
+cd ../..
+yarn example ios
+```
+
+If your change affects Android, also verify:
 
 ```sh
 yarn example android
 ```
 
-To run the example app on iOS:
+## Commit messages
 
-```sh
-yarn example ios
-```
+This repo follows [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
-To confirm that the app is running with the new architecture, you can check the Metro logs for a message like this:
+Examples:
 
-```sh
-Running "WfloatExample" with {"fabric":true,"initialProps":{"concurrentRoot":true},"rootTag":1}
-```
+- `feat: add playback status event`
+- `fix: correct Android module initialization`
+- `docs: update iOS setup instructions`
+- `chore: refresh build configuration`
 
-Note the `"fabric":true` and `"concurrentRoot":true` properties.
+## Publishing
 
-Make sure your code passes TypeScript and ESLint. Run the following to verify:
-
-```sh
-yarn typecheck
-yarn lint
-```
-
-To fix formatting errors, run the following:
-
-```sh
-yarn lint --fix
-```
-
-Remember to add tests for your change if possible. Run the unit tests by:
-
-```sh
-yarn test
-```
-
-### Commit message convention
-
-We follow the [conventional commits specification](https://www.conventionalcommits.org/en) for our commit messages:
-
-- `fix`: bug fixes, e.g. fix crash due to deprecated method.
-- `feat`: new features, e.g. add new method to the module.
-- `refactor`: code refactor, e.g. migrate from class components to hooks.
-- `docs`: changes into documentation, e.g. add usage example for the module..
-- `test`: adding or updating tests, e.g. add integration tests using detox.
-- `chore`: tooling changes, e.g. change CI config.
-
-Our pre-commit hooks verify that your commit message matches this format when committing.
-
-### Linting and tests
-
-[ESLint](https://eslint.org/), [Prettier](https://prettier.io/), [TypeScript](https://www.typescriptlang.org/)
-
-We use [TypeScript](https://www.typescriptlang.org/) for type checking, [ESLint](https://eslint.org/) with [Prettier](https://prettier.io/) for linting and formatting the code, and [Jest](https://jestjs.io/) for testing.
-
-Our pre-commit hooks verify that the linter and tests pass when committing.
-
-### Publishing to npm
-
-We use [release-it](https://github.com/release-it/release-it) to make it easier to publish new versions. It handles common tasks like bumping version based on semver, creating tags and releases etc.
-
-To publish new versions, run the following:
+This repo uses `release-it` for releases:
 
 ```sh
 yarn release
 ```
 
-### Scripts
+Before publishing, make sure the package has been rebuilt and the example app still validates the current changes.
 
-The `package.json` file contains various scripts for common tasks:
+## Pull requests
 
-- `yarn`: setup project by installing dependencies.
-- `yarn typecheck`: type-check files with TypeScript.
-- `yarn lint`: lint files with ESLint.
-- `yarn test`: run unit tests with Jest.
-- `yarn example start`: start the Metro server for the example app.
-- `yarn example android`: run the example app on Android.
-- `yarn example ios`: run the example app on iOS.
+When opening a pull request:
 
-### Sending a pull request
-
-> **Working on your first pull request?** You can learn how from this _free_ series: [How to Contribute to an Open Source Project on GitHub](https://app.egghead.io/playlists/how-to-contribute-to-an-open-source-project-on-github).
-
-When you're sending a pull request:
-
-- Prefer small pull requests focused on one change.
-- Verify that linters and tests are passing.
-- Review the documentation to make sure it looks good.
-- Follow the pull request template when opening a pull request.
-- For pull requests that change the API or implementation, discuss with maintainers first by opening an issue.
+- keep the change focused
+- include tests when practical
+- update docs when behavior or setup changes
+- mention any iOS or Android manual verification you performed

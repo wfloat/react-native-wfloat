@@ -1,6 +1,6 @@
 #import "Wfloat.h"
 #import <AVFoundation/AVFoundation.h>
-#import "sherpa-onnx.xcframework/Headers/sherpa-onnx/c-api/c-api.h"
+#import <sherpa-onnx/c-api/c-api.h>
 #import "WfloatAudioStreamer.h"
 //#import "react_native_wfloat-Swift.h"
 
@@ -18,8 +18,8 @@ int StreamingCallback(const float *samples, int32_t n, float p) {
 @interface Wfloat () <AVAudioPlayerDelegate>
 @property (strong, nonatomic) AVAudioPlayer *audioPlayer;
 @property (strong, nonatomic) WfloatAudioStreamer *audioStreamer;
-//@property (nonatomic) SherpaOnnxOfflineTts *tts;
-@property (nonatomic, assign) SherpaOnnxOfflineTts *tts;
+//@property (nonatomic) const SherpaOnnxOfflineTts *tts;
+@property (nonatomic, assign) const SherpaOnnxOfflineTts *tts;
 @property (nonatomic, copy) NSString *loadedModelPath;
 
 - (void)enqueueAudioSamples:(const float *)samples length:(int32_t)n;
