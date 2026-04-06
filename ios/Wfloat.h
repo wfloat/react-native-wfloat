@@ -3,7 +3,7 @@
 #ifdef RCT_NEW_ARCH_ENABLED
 
 #import "generated/RNWfloatSpec/RNWfloatSpec.h"
-@interface Wfloat : NSObject <NativeWfloatSpec>
+@interface Wfloat : NativeWfloatSpecBase <NativeWfloatSpec>
 
 #else
 

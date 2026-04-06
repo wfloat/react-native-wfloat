@@ -3,6 +3,7 @@ package com.wfloat
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableMap
 import android.content.res.AssetManager
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
@@ -28,6 +29,13 @@ class WfloatModule(reactContext: ReactApplicationContext) :
 
   override fun getName(): String {
     return NAME
+  }
+
+  override fun loadModel(options: ReadableMap, promise: Promise) {
+    promise.reject(
+      "UNIMPLEMENTED",
+      "loadModel is only implemented on iOS right now."
+    )
   }
 
   private fun copyDir(assetManager: AssetManager, assetDir: String, targetDir: File) {
