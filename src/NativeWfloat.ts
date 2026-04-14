@@ -6,6 +6,8 @@ export type LoadModelNativeOptions = {
   modelId: string;
   modelUrl: string;
   tokensUrl: string;
+  espeakDataUrl: string;
+  espeakChecksum: string;
 };
 
 export type NativeLoadModelProgressEvent = {

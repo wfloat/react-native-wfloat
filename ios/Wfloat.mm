@@ -1,5 +1,7 @@
 #import "Wfloat.h"
 #import <AVFoundation/AVFoundation.h>
+#import <AppleArchive/AppleArchive.h>
+#import <CommonCrypto/CommonDigest.h>
 #import <sherpa-onnx/c-api/c-api.h>
 #import "WfloatAudioStreamer.h"
 
@@ -7,9 +9,11 @@ typedef NS_ENUM(NSInteger, WfloatLoadModelDownloadPhase) {
   WfloatLoadModelDownloadPhaseNone = 0,
   WfloatLoadModelDownloadPhaseModel = 1,
   WfloatLoadModelDownloadPhaseTokens = 2,
+  WfloatLoadModelDownloadPhaseEspeakData = 3,
 };
 
 static NSString *const WfloatErrorDomain = @"WfloatErrorDomain";
+static NSString *const WfloatReadyMarkerFileName = @".ready";
 static Wfloat *g_self = nil;
 
 int StreamingCallback(const float *samples, int32_t n, float p) {
@@ -20,32 +24,23 @@ int StreamingCallback(const float *samples, int32_t n, float p) {
   return 1;
 }
 
-static NSString *WfloatPathForBundledResource(NSString *resourceName) {
-  NSArray<NSBundle *> *candidateBundles = @[
-    [NSBundle bundleForClass:[Wfloat class]],
-    [NSBundle mainBundle],
-  ];
-
-  for (NSBundle *bundle in candidateBundles) {
-    NSString *path = [bundle pathForResource:resourceName ofType:nil];
-    if (path.length > 0) {
-      return path;
-    }
-  }
-
-  return nil;
-}
-
 static NSString *WfloatCacheRootDirectory(void) {
   NSArray<NSString *> *paths =
       NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
   NSString *cacheDirectory = paths.firstObject ?: NSTemporaryDirectory();
-  return [cacheDirectory stringByAppendingPathComponent:@"wfloat/models"];
+  return [cacheDirectory stringByAppendingPathComponent:@"wfloat"];
 }
 
-static NSString *WfloatSanitizePathComponent(NSString *value) {
-  return [[value stringByReplacingOccurrencesOfString:@"/" withString:@"_"]
-      stringByReplacingOccurrencesOfString:@":" withString:@"_"];
+static NSString *WfloatModelCacheRootDirectory(void) {
+  return [WfloatCacheRootDirectory() stringByAppendingPathComponent:@"models"];
+}
+
+static NSString *WfloatEspeakCacheRootDirectory(void) {
+  return [WfloatCacheRootDirectory() stringByAppendingPathComponent:@"espeak"];
+}
+
+static NSString *WfloatEspeakWorkRootDirectory(void) {
+  return [WfloatCacheRootDirectory() stringByAppendingPathComponent:@"espeak-work"];
 }
 
 @interface Wfloat () <AVAudioPlayerDelegate, NSURLSessionDownloadDelegate>
@@ -54,6 +49,7 @@ static NSString *WfloatSanitizePathComponent(NSString *value) {
 @property (nonatomic, assign) const SherpaOnnxOfflineTts *tts;
 @property (nonatomic, copy) NSString *loadedModelPath;
 @property (nonatomic, copy) NSString *loadedTokensPath;
+@property (nonatomic, copy) NSString *loadedDataDir;
 @property (nonatomic, copy) NSString *loadedModelId;
 @property (strong, nonatomic) NSURLSession *loadModelSession;
 @property (nonatomic, copy) RCTPromiseResolveBlock loadModelResolve;
@@ -61,14 +57,19 @@ static NSString *WfloatSanitizePathComponent(NSString *value) {
 @property (nonatomic, copy) NSString *pendingModelId;
 @property (nonatomic, copy) NSString *pendingModelURLString;
 @property (nonatomic, copy) NSString *pendingTokensURLString;
+@property (nonatomic, copy) NSString *pendingEspeakDataURLString;
+@property (nonatomic, copy) NSString *pendingEspeakChecksum;
 @property (nonatomic, copy) NSString *pendingModelPath;
 @property (nonatomic, copy) NSString *pendingTokensPath;
+@property (nonatomic, copy) NSString *pendingEspeakDirectoryPath;
+@property (nonatomic, copy) NSString *pendingEspeakArchivePath;
 @property (nonatomic, copy) NSString *currentDownloadDestinationPath;
 @property (nonatomic, assign) WfloatLoadModelDownloadPhase currentDownloadPhase;
 @property (nonatomic, assign) BOOL pendingNeedsModelDownload;
 @property (nonatomic, assign) BOOL pendingNeedsTokensDownload;
-@property (nonatomic, assign) BOOL plannedModelDownload;
-@property (nonatomic, assign) BOOL plannedTokensDownload;
+@property (nonatomic, assign) BOOL pendingNeedsEspeakDownload;
+@property (nonatomic, assign) NSUInteger completedDownloadCount;
+@property (nonatomic, assign) NSUInteger totalPlannedDownloadCount;
 @property (nonatomic, assign) float lastEmittedDownloadProgress;
 
 - (void)enqueueAudioSamples:(const float *)samples length:(int32_t)n;
@@ -102,8 +103,57 @@ RCT_EXPORT_MODULE()
 }
 
 - (NSString *)cacheDirectoryForModelId:(NSString *)modelId {
-  NSString *sanitizedModelId = WfloatSanitizePathComponent(modelId);
-  return [WfloatCacheRootDirectory() stringByAppendingPathComponent:sanitizedModelId];
+  return [WfloatModelCacheRootDirectory() stringByAppendingPathComponent:modelId];
+}
+
+- (NSString *)espeakDirectoryForChecksum:(NSString *)checksum {
+  return [WfloatEspeakCacheRootDirectory() stringByAppendingPathComponent:checksum.lowercaseString];
+}
+
+- (NSString *)espeakArchivePathForChecksum:(NSString *)checksum {
+  NSString *archiveFileName = [NSString stringWithFormat:@"%@.aar", checksum.lowercaseString];
+  return [WfloatEspeakWorkRootDirectory() stringByAppendingPathComponent:archiveFileName];
+}
+
+- (NSString *)espeakReadyMarkerPathForDirectory:(NSString *)directoryPath {
+  return [directoryPath stringByAppendingPathComponent:WfloatReadyMarkerFileName];
+}
+
+- (BOOL)isInstalledEspeakDirectoryAtPath:(NSString *)directoryPath {
+  BOOL isDirectory = NO;
+  BOOL directoryExists =
+      [[NSFileManager defaultManager] fileExistsAtPath:directoryPath isDirectory:&isDirectory];
+  if (!directoryExists || !isDirectory) {
+    return NO;
+  }
+
+  return [[NSFileManager defaultManager]
+      fileExistsAtPath:[self espeakReadyMarkerPathForDirectory:directoryPath]];
+}
+
+- (NSString *)normalizedChecksum:(NSString *)checksum {
+  return [[checksum stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      lowercaseString];
+}
+
+- (void)cleanupDirectoryContentsAtPath:(NSString *)directoryPath {
+  NSError *contentsError = nil;
+  NSArray<NSString *> *fileNames =
+      [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directoryPath error:&contentsError];
+  if (contentsError || fileNames.count == 0) {
+    return;
+  }
+
+  for (NSString *fileName in fileNames) {
+    NSString *path = [directoryPath stringByAppendingPathComponent:fileName];
+    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+  }
+}
+
+- (void)cleanupEspeakWorkDirectory {
+  NSString *workDirectoryPath = WfloatEspeakWorkRootDirectory();
+  [self cleanupDirectoryContentsAtPath:workDirectoryPath];
+  [[NSFileManager defaultManager] removeItemAtPath:workDirectoryPath error:nil];
 }
 
 - (void)emitLoadModelProgressWithStatus:(NSString *)status progress:(NSNumber *)progress {
@@ -127,15 +177,21 @@ RCT_EXPORT_MODULE()
   self.pendingModelId = nil;
   self.pendingModelURLString = nil;
   self.pendingTokensURLString = nil;
+  self.pendingEspeakDataURLString = nil;
+  self.pendingEspeakChecksum = nil;
   self.pendingModelPath = nil;
   self.pendingTokensPath = nil;
+  self.pendingEspeakDirectoryPath = nil;
+  self.pendingEspeakArchivePath = nil;
   self.currentDownloadDestinationPath = nil;
   self.currentDownloadPhase = WfloatLoadModelDownloadPhaseNone;
   self.pendingNeedsModelDownload = NO;
   self.pendingNeedsTokensDownload = NO;
-  self.plannedModelDownload = NO;
-  self.plannedTokensDownload = NO;
+  self.pendingNeedsEspeakDownload = NO;
+  self.completedDownloadCount = 0;
+  self.totalPlannedDownloadCount = 0;
   self.lastEmittedDownloadProgress = -1;
+  [self cleanupEspeakWorkDirectory];
 }
 
 - (void)rejectPendingLoadModelWithCode:(NSString *)code
@@ -166,9 +222,288 @@ RCT_EXPORT_MODULE()
   if (error) {
     *error = [NSError errorWithDomain:WfloatErrorDomain
                                  code:100
-                             userInfo:@{NSLocalizedDescriptionKey : @"Invalid model asset URL"}];
+                             userInfo:@{NSLocalizedDescriptionKey : @"Invalid loadModel asset URL."}];
   }
   return nil;
+}
+
+- (NSString *)sha256ForFileAtPath:(NSString *)filePath error:(NSError **)error {
+  NSInputStream *inputStream = [NSInputStream inputStreamWithFileAtPath:filePath];
+  [inputStream open];
+
+  if (inputStream.streamStatus != NSStreamStatusOpen) {
+    if (error) {
+      *error = inputStream.streamError ?: [NSError errorWithDomain:WfloatErrorDomain
+                                                              code:102
+                                                          userInfo:@{
+                                                            NSLocalizedDescriptionKey :
+                                                                @"Failed to open downloaded asset for checksum verification.",
+                                                          }];
+    }
+    return nil;
+  }
+
+  CC_SHA256_CTX context;
+  CC_SHA256_Init(&context);
+
+  uint8_t buffer[64 * 1024];
+  NSInteger bytesRead = 0;
+  while ((bytesRead = [inputStream read:buffer maxLength:sizeof(buffer)]) > 0) {
+    CC_SHA256_Update(&context, buffer, (CC_LONG)bytesRead);
+  }
+
+  NSError *streamError = inputStream.streamError;
+  [inputStream close];
+
+  if (bytesRead < 0 || streamError) {
+    if (error) {
+      *error = streamError ?: [NSError errorWithDomain:WfloatErrorDomain
+                                                  code:103
+                                              userInfo:@{
+                                                NSLocalizedDescriptionKey :
+                                                    @"Failed to read downloaded asset for checksum verification.",
+                                              }];
+    }
+    return nil;
+  }
+
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  CC_SHA256_Final(digest, &context);
+
+  NSMutableString *hash = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+  for (NSInteger index = 0; index < CC_SHA256_DIGEST_LENGTH; index += 1) {
+    [hash appendFormat:@"%02x", digest[index]];
+  }
+
+  return hash;
+}
+
+- (NSString *)resolvedEspeakDataDirectoryFromExtractionRoot:(NSString *)extractionRoot
+                                                      error:(NSError **)error {
+  NSError *contentsError = nil;
+  NSArray<NSString *> *contents =
+      [[NSFileManager defaultManager] contentsOfDirectoryAtPath:extractionRoot error:&contentsError];
+  if (contentsError) {
+    if (error) {
+      *error = contentsError;
+    }
+    return nil;
+  }
+
+  NSMutableArray<NSString *> *filteredContents = [NSMutableArray array];
+  for (NSString *entry in contents) {
+    if ([entry hasPrefix:@"."] || [entry isEqualToString:@"__MACOSX"]) {
+      continue;
+    }
+
+    [filteredContents addObject:entry];
+  }
+
+  NSString *namedDirectoryPath = [extractionRoot stringByAppendingPathComponent:@"espeak-ng-data"];
+  BOOL isNamedDirectory = NO;
+  if ([[NSFileManager defaultManager] fileExistsAtPath:namedDirectoryPath isDirectory:&isNamedDirectory] &&
+      isNamedDirectory) {
+    return namedDirectoryPath;
+  }
+
+  NSMutableArray<NSString *> *childDirectories = [NSMutableArray array];
+  for (NSString *entry in filteredContents) {
+    NSString *entryPath = [extractionRoot stringByAppendingPathComponent:entry];
+    BOOL isDirectory = NO;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:entryPath isDirectory:&isDirectory] &&
+        isDirectory) {
+      [childDirectories addObject:entryPath];
+    }
+  }
+
+  if (filteredContents.count == 1 && childDirectories.count == 1) {
+    return childDirectories.firstObject;
+  }
+
+  return extractionRoot;
+}
+
+- (BOOL)installEspeakArchiveAtPath:(NSString *)archivePath
+                          checksum:(NSString *)checksum
+                   destinationPath:(NSString *)destinationPath
+                             error:(NSError **)error {
+  NSString *computedChecksum = [self sha256ForFileAtPath:archivePath error:error];
+  if (computedChecksum.length == 0) {
+    return NO;
+  }
+
+  NSString *normalizedChecksum = [self normalizedChecksum:checksum];
+  if (![computedChecksum isEqualToString:normalizedChecksum]) {
+    if (error) {
+      *error = [NSError errorWithDomain:WfloatErrorDomain
+                                   code:104
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Downloaded espeak-ng-data checksum did not match the expected value.",
+                               }];
+    }
+    return NO;
+  }
+
+  NSError *filesystemError = nil;
+  if (![self ensureDirectoryExistsAtPath:WfloatEspeakWorkRootDirectory() error:&filesystemError]) {
+    if (error) {
+      *error = filesystemError;
+    }
+    return NO;
+  }
+
+  NSString *temporaryRoot = [WfloatEspeakWorkRootDirectory()
+      stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
+  if (![self ensureDirectoryExistsAtPath:temporaryRoot error:&filesystemError]) {
+    if (error) {
+      *error = filesystemError;
+    }
+    return NO;
+  }
+
+  AAByteStream fileStream =
+      AAFileStreamOpenWithPath(archivePath.fileSystemRepresentation, O_RDONLY, 0);
+  if (fileStream == NULL) {
+    [[NSFileManager defaultManager] removeItemAtPath:temporaryRoot error:nil];
+    if (error) {
+      *error = [NSError errorWithDomain:WfloatErrorDomain
+                                   code:105
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Failed to open espeak-ng-data archive for extraction.",
+                               }];
+    }
+    return NO;
+  }
+
+  AAByteStream decompressedStream = AADecompressionInputStreamOpen(fileStream, 0, 0);
+  if (decompressedStream == NULL) {
+    AAByteStreamClose(fileStream);
+    [[NSFileManager defaultManager] removeItemAtPath:temporaryRoot error:nil];
+    if (error) {
+      *error = [NSError errorWithDomain:WfloatErrorDomain
+                                   code:106
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Failed to open Apple Archive decompression stream.",
+                               }];
+    }
+    return NO;
+  }
+
+  AAArchiveStream decodeStream = AADecodeArchiveInputStreamOpen(decompressedStream, NULL, NULL, 0, 0);
+  if (decodeStream == NULL) {
+    AAByteStreamClose(decompressedStream);
+    AAByteStreamClose(fileStream);
+    [[NSFileManager defaultManager] removeItemAtPath:temporaryRoot error:nil];
+    if (error) {
+      *error = [NSError errorWithDomain:WfloatErrorDomain
+                                   code:107
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Failed to decode Apple Archive stream.",
+                               }];
+    }
+    return NO;
+  }
+
+  AAArchiveStream extractStream =
+      AAExtractArchiveOutputStreamOpen(temporaryRoot.fileSystemRepresentation, NULL, NULL, 0, 0);
+  if (extractStream == NULL) {
+    AAArchiveStreamClose(decodeStream);
+    AAByteStreamClose(decompressedStream);
+    AAByteStreamClose(fileStream);
+    [[NSFileManager defaultManager] removeItemAtPath:temporaryRoot error:nil];
+    if (error) {
+      *error = [NSError errorWithDomain:WfloatErrorDomain
+                                   code:108
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Failed to open Apple Archive extraction stream.",
+                               }];
+    }
+    return NO;
+  }
+
+  ssize_t processedEntryCount = AAArchiveStreamProcess(decodeStream, extractStream, NULL, NULL, 0, 0);
+  int extractCloseStatus = AAArchiveStreamClose(extractStream);
+  int decodeCloseStatus = AAArchiveStreamClose(decodeStream);
+  int decompressedCloseStatus = AAByteStreamClose(decompressedStream);
+  int fileCloseStatus = AAByteStreamClose(fileStream);
+  BOOL didExtract = processedEntryCount >= 0 && extractCloseStatus == 0 && decodeCloseStatus == 0 &&
+      decompressedCloseStatus == 0 && fileCloseStatus == 0;
+  if (!didExtract) {
+    NSInteger archiveErrorCode = 0;
+    if (processedEntryCount < 0) {
+      archiveErrorCode = processedEntryCount;
+    } else if (extractCloseStatus != 0) {
+      archiveErrorCode = extractCloseStatus;
+    } else if (decodeCloseStatus != 0) {
+      archiveErrorCode = decodeCloseStatus;
+    } else if (decompressedCloseStatus != 0) {
+      archiveErrorCode = decompressedCloseStatus;
+    } else if (fileCloseStatus != 0) {
+      archiveErrorCode = fileCloseStatus;
+    }
+
+    [[NSFileManager defaultManager] removeItemAtPath:temporaryRoot error:nil];
+    if (error) {
+      *error = [NSError errorWithDomain:WfloatErrorDomain
+                                   code:109
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     [NSString stringWithFormat:
+                                                   @"Failed to extract Apple Archive espeak-ng-data asset (code %ld).",
+                                                   (long)archiveErrorCode],
+                               }];
+    }
+    return NO;
+  }
+
+  NSString *resolvedDataDirectory =
+      [self resolvedEspeakDataDirectoryFromExtractionRoot:temporaryRoot error:&filesystemError];
+  if (resolvedDataDirectory.length == 0) {
+    [[NSFileManager defaultManager] removeItemAtPath:temporaryRoot error:nil];
+    if (error) {
+      *error = filesystemError ?: [NSError errorWithDomain:WfloatErrorDomain
+                                                      code:110
+                                                  userInfo:@{
+                                                    NSLocalizedDescriptionKey :
+                                                        @"Unable to locate extracted espeak-ng-data directory.",
+                                                  }];
+    }
+    return NO;
+  }
+
+  [[NSFileManager defaultManager] removeItemAtPath:destinationPath error:nil];
+  if (![[NSFileManager defaultManager] moveItemAtPath:resolvedDataDirectory
+                                               toPath:destinationPath
+                                                error:&filesystemError]) {
+    [[NSFileManager defaultManager] removeItemAtPath:temporaryRoot error:nil];
+    if (error) {
+      *error = filesystemError;
+    }
+    return NO;
+  }
+
+  NSString *readyMarkerPath = [self espeakReadyMarkerPathForDirectory:destinationPath];
+  if (![WfloatReadyMarkerFileName writeToFile:readyMarkerPath
+                                   atomically:YES
+                                     encoding:NSUTF8StringEncoding
+                                        error:&filesystemError]) {
+    [[NSFileManager defaultManager] removeItemAtPath:destinationPath error:nil];
+    if (error) {
+      *error = filesystemError;
+    }
+    return NO;
+  }
+
+  if (![resolvedDataDirectory isEqualToString:temporaryRoot]) {
+    [[NSFileManager defaultManager] removeItemAtPath:temporaryRoot error:nil];
+  }
+
+  return YES;
 }
 
 - (BOOL)loadTtsWithModelPath:(NSString *)modelPath
@@ -177,7 +512,8 @@ RCT_EXPORT_MODULE()
                      modelId:(NSString *)modelId
                        error:(NSError **)error {
   if (self.tts && [self.loadedModelPath isEqualToString:modelPath] &&
-      [self.loadedTokensPath isEqualToString:tokensPath]) {
+      [self.loadedTokensPath isEqualToString:tokensPath] &&
+      [self.loadedDataDir isEqualToString:dataDir]) {
     return YES;
   }
 
@@ -215,6 +551,7 @@ RCT_EXPORT_MODULE()
   self.loadedModelId = modelId;
   self.loadedModelPath = modelPath;
   self.loadedTokensPath = tokensPath;
+  self.loadedDataDir = dataDir;
   return YES;
 }
 
@@ -241,16 +578,35 @@ RCT_EXPORT_MODULE()
   }
 }
 
-- (double)overallProgressForPhaseProgress:(double)phaseProgress {
-  double clampedPhaseProgress = MIN(MAX(phaseProgress, 0), 1);
-  if (self.plannedModelDownload && self.plannedTokensDownload) {
-    if (self.currentDownloadPhase == WfloatLoadModelDownloadPhaseModel) {
-      return clampedPhaseProgress * 0.95;
+- (void)cleanupStaleEspeakDirectoriesKeepingCurrent:(NSString *)activeDirectoryPath {
+  NSString *directoryPath = WfloatEspeakCacheRootDirectory();
+  NSString *activeDirectoryName = activeDirectoryPath.lastPathComponent;
+  NSError *contentsError = nil;
+  NSArray<NSString *> *fileNames =
+      [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directoryPath error:&contentsError];
+  if (contentsError || fileNames.count == 0) {
+    return;
+  }
+
+  for (NSString *fileName in fileNames) {
+    if ([fileName isEqualToString:activeDirectoryName]) {
+      continue;
     }
 
-    if (self.currentDownloadPhase == WfloatLoadModelDownloadPhaseTokens) {
-      return 0.95 + (clampedPhaseProgress * 0.05);
+    NSString *path = [directoryPath stringByAppendingPathComponent:fileName];
+    BOOL isDirectory = NO;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDirectory] &&
+        isDirectory) {
+      [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
     }
+  }
+}
+
+- (double)overallProgressForPhaseProgress:(double)phaseProgress {
+  double clampedPhaseProgress = MIN(MAX(phaseProgress, 0), 1);
+  if (self.totalPlannedDownloadCount > 0) {
+    return (self.completedDownloadCount + clampedPhaseProgress) /
+        (double)self.totalPlannedDownloadCount;
   }
 
   return clampedPhaseProgress;
@@ -268,10 +624,10 @@ RCT_EXPORT_MODULE()
 }
 
 - (void)finishPendingLoadModel {
-  NSString *dataDir = WfloatPathForBundledResource(@"espeak-ng-data");
-  if (dataDir.length == 0) {
-    [self rejectPendingLoadModelWithCode:@"missing_resources"
-                                 message:@"espeak-ng-data resource bundle is missing."
+  NSString *dataDir = self.pendingEspeakDirectoryPath;
+  if (![self isInstalledEspeakDirectoryAtPath:dataDir]) {
+    [self rejectPendingLoadModelWithCode:@"missing_espeak_data"
+                                 message:@"espeak-ng-data is not installed."
                                    error:nil];
     return;
   }
@@ -300,6 +656,7 @@ RCT_EXPORT_MODULE()
                                                            self.pendingTokensPath.lastPathComponent,
                                                            nil];
       [self cleanupStaleFilesInDirectory:directoryPath activeFileNames:activeFileNames];
+      [self cleanupStaleEspeakDirectoriesKeepingCurrent:self.pendingEspeakDirectoryPath];
       [self emitLoadModelProgressWithStatus:@"completed" progress:nil];
       [self resolvePendingLoadModel];
     });
@@ -348,6 +705,13 @@ RCT_EXPORT_MODULE()
     return;
   }
 
+  if (self.pendingNeedsEspeakDownload) {
+    [self startDownloadFromURLString:self.pendingEspeakDataURLString
+                     destinationPath:self.pendingEspeakArchivePath
+                               phase:WfloatLoadModelDownloadPhaseEspeakData];
+    return;
+  }
+
   [self finishPendingLoadModel];
 }
 
@@ -362,14 +726,20 @@ RCT_EXPORT_MODULE()
   NSString *modelId = options.modelId();
   NSString *modelURLString = options.modelUrl();
   NSString *tokensURLString = options.tokensUrl();
-  if (modelId.length == 0 || modelURLString.length == 0 || tokensURLString.length == 0) {
-    reject(@"invalid_arguments", @"modelId, modelUrl, and tokensUrl are required.", nil);
+  NSString *espeakDataURLString = options.espeakDataUrl();
+  NSString *normalizedEspeakChecksum = [self normalizedChecksum:options.espeakChecksum()];
+  if (modelId.length == 0 || modelURLString.length == 0 || tokensURLString.length == 0 ||
+      espeakDataURLString.length == 0 || normalizedEspeakChecksum.length == 0) {
+    reject(@"invalid_arguments",
+           @"modelId, modelUrl, tokensUrl, espeakDataUrl, and espeakChecksum are required.",
+           nil);
     return;
   }
 
   NSError *pathError = nil;
   NSString *modelFileName = [self fileNameFromURLString:modelURLString error:&pathError];
   NSString *tokensFileName = [self fileNameFromURLString:tokensURLString error:&pathError];
+  (void)[self fileNameFromURLString:espeakDataURLString error:&pathError];
   if (pathError) {
     reject(@"invalid_url", pathError.localizedDescription, pathError);
     return;
@@ -381,21 +751,36 @@ RCT_EXPORT_MODULE()
     return;
   }
 
+  NSString *espeakDirectoryPath = [self espeakDirectoryForChecksum:normalizedEspeakChecksum];
+  if (![self ensureDirectoryExistsAtPath:WfloatEspeakCacheRootDirectory() error:&pathError] ||
+      ![self ensureDirectoryExistsAtPath:WfloatEspeakWorkRootDirectory() error:&pathError]) {
+    reject(@"filesystem_error", pathError.localizedDescription, pathError);
+    return;
+  }
+
   NSString *modelPath = [directoryPath stringByAppendingPathComponent:modelFileName];
   NSString *tokensPath = [directoryPath stringByAppendingPathComponent:tokensFileName];
+  NSString *espeakArchivePath = [self espeakArchivePathForChecksum:normalizedEspeakChecksum];
 
   self.loadModelResolve = resolve;
   self.loadModelReject = reject;
   self.pendingModelId = modelId;
   self.pendingModelURLString = modelURLString;
   self.pendingTokensURLString = tokensURLString;
+  self.pendingEspeakDataURLString = espeakDataURLString;
+  self.pendingEspeakChecksum = normalizedEspeakChecksum;
   self.pendingModelPath = modelPath;
   self.pendingTokensPath = tokensPath;
+  self.pendingEspeakDirectoryPath = espeakDirectoryPath;
+  self.pendingEspeakArchivePath = espeakArchivePath;
   self.pendingNeedsModelDownload = ![[NSFileManager defaultManager] fileExistsAtPath:modelPath];
   self.pendingNeedsTokensDownload = ![[NSFileManager defaultManager] fileExistsAtPath:tokensPath];
-  self.plannedModelDownload = self.pendingNeedsModelDownload;
-  self.plannedTokensDownload = self.pendingNeedsTokensDownload;
+  self.pendingNeedsEspeakDownload = ![self isInstalledEspeakDirectoryAtPath:espeakDirectoryPath];
   self.currentDownloadPhase = WfloatLoadModelDownloadPhaseNone;
+  self.completedDownloadCount = 0;
+  self.totalPlannedDownloadCount =
+      (self.pendingNeedsModelDownload ? 1 : 0) + (self.pendingNeedsTokensDownload ? 1 : 0) +
+      (self.pendingNeedsEspeakDownload ? 1 : 0);
   self.lastEmittedDownloadProgress = -1;
 
   [self startNextPendingDownloadStep];
@@ -452,8 +837,24 @@ didFinishDownloadingToURL:(NSURL *)location {
     self.pendingNeedsModelDownload = NO;
   } else if (self.currentDownloadPhase == WfloatLoadModelDownloadPhaseTokens) {
     self.pendingNeedsTokensDownload = NO;
+  } else if (self.currentDownloadPhase == WfloatLoadModelDownloadPhaseEspeakData) {
+    BOOL didInstallEspeak = [self installEspeakArchiveAtPath:destinationPath
+                                                    checksum:self.pendingEspeakChecksum
+                                             destinationPath:self.pendingEspeakDirectoryPath
+                                                       error:&fileError];
+    [[NSFileManager defaultManager] removeItemAtPath:destinationPath error:nil];
+  if (!didInstallEspeak) {
+      [self rejectPendingLoadModelWithCode:@"espeak_install_failed"
+                                   message:fileError.localizedDescription ?:
+                                               @"Failed to install espeak-ng-data."
+                                     error:fileError];
+      return;
+    }
+
+    self.pendingNeedsEspeakDownload = NO;
   }
 
+  self.completedDownloadCount += 1;
   self.currentDownloadDestinationPath = nil;
   [self startNextPendingDownloadStep];
 }

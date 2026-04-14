@@ -35,6 +35,8 @@ export class SpeechClient {
         modelId,
         modelUrl: assets.model_onnx,
         tokensUrl: assets.model_tokens,
+        espeakDataUrl: assets.espeak_data,
+        espeakChecksum: assets.espeak_checksum,
       });
       this.status = 'idle';
     } catch (error) {
