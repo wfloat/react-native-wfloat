@@ -10,17 +10,42 @@ export type LoadModelNativeOptions = {
   espeakChecksum: string;
 };
 
+export type GenerateNativeOptions = {
+  requestId: number;
+  text: string;
+  sid: number;
+  emotion: string;
+  intensity: number;
+  speed: number;
+  silencePaddingSec: number;
+};
+
 export type NativeLoadModelProgressEvent = {
   status: string;
   progress?: number;
 };
 
+export type NativeSpeechProgressEvent = {
+  requestId: number;
+  progress: number;
+  isPlaying: boolean;
+  textHighlightStart: number;
+  textHighlightEnd: number;
+  text: string;
+};
+
+export type NativeSpeechPlaybackFinishedEvent = {
+  requestId: number;
+};
+
 export interface Spec extends TurboModule {
   loadModel(options: LoadModelNativeOptions): Promise<void>;
+  generate(options: GenerateNativeOptions): Promise<void>;
+  play(): Promise<void>;
+  pause(): Promise<void>;
   readonly onLoadModelProgress: EventEmitter<NativeLoadModelProgressEvent>;
-  speech(modelPath: string, inputText: string): string;
-  streamSpeech(modelPath: string, inputText: string): Promise<string>;
-  playWav(filePath: string): string;
+  readonly onSpeechProgress: EventEmitter<NativeSpeechProgressEvent>;
+  readonly onSpeechPlaybackFinished: EventEmitter<NativeSpeechPlaybackFinishedEvent>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('Wfloat');

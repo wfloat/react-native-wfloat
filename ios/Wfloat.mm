@@ -1,9 +1,10 @@
 #import "Wfloat.h"
-#import <AVFoundation/AVFoundation.h>
+#import "WfloatSpeechSession.h"
 #import <AppleArchive/AppleArchive.h>
 #import <CommonCrypto/CommonDigest.h>
+#import <math.h>
 #import <sherpa-onnx/c-api/c-api.h>
-#import "WfloatAudioStreamer.h"
+#import <string.h>
 
 typedef NS_ENUM(NSInteger, WfloatLoadModelDownloadPhase) {
   WfloatLoadModelDownloadPhaseNone = 0,
@@ -14,15 +15,12 @@ typedef NS_ENUM(NSInteger, WfloatLoadModelDownloadPhase) {
 
 static NSString *const WfloatErrorDomain = @"WfloatErrorDomain";
 static NSString *const WfloatReadyMarkerFileName = @".ready";
-static Wfloat *g_self = nil;
 
-int StreamingCallback(const float *samples, int32_t n, float p) {
-  printf("Progress: %.2f, Num Samples: %d\n", p, n);
-  if (g_self && samples && n > 0) {
-    [(Wfloat *)g_self enqueueAudioSamples:samples length:n];
-  }
-  return 1;
-}
+typedef NS_ENUM(NSInteger, WfloatGenerateResult) {
+  WfloatGenerateResultCompleted = 0,
+  WfloatGenerateResultCancelled = 1,
+  WfloatGenerateResultFailed = 2,
+};
 
 static NSString *WfloatCacheRootDirectory(void) {
   NSArray<NSString *> *paths =
@@ -43,14 +41,11 @@ static NSString *WfloatEspeakWorkRootDirectory(void) {
   return [WfloatCacheRootDirectory() stringByAppendingPathComponent:@"espeak-work"];
 }
 
-@interface Wfloat () <AVAudioPlayerDelegate, NSURLSessionDownloadDelegate>
-@property (strong, nonatomic) AVAudioPlayer *audioPlayer;
-@property (strong, nonatomic) WfloatAudioStreamer *audioStreamer;
+@interface Wfloat () <NSURLSessionDownloadDelegate>
 @property (nonatomic, assign) const SherpaOnnxOfflineTts *tts;
 @property (nonatomic, copy) NSString *loadedModelPath;
 @property (nonatomic, copy) NSString *loadedTokensPath;
 @property (nonatomic, copy) NSString *loadedDataDir;
-@property (nonatomic, copy) NSString *loadedModelId;
 @property (strong, nonatomic) NSURLSession *loadModelSession;
 @property (nonatomic, copy) RCTPromiseResolveBlock loadModelResolve;
 @property (nonatomic, copy) RCTPromiseRejectBlock loadModelReject;
@@ -71,8 +66,9 @@ static NSString *WfloatEspeakWorkRootDirectory(void) {
 @property (nonatomic, assign) NSUInteger completedDownloadCount;
 @property (nonatomic, assign) NSUInteger totalPlannedDownloadCount;
 @property (nonatomic, assign) float lastEmittedDownloadProgress;
+@property (nonatomic, strong) WfloatSpeechSession *speechSession;
+@property (nonatomic) dispatch_queue_t workQueue;
 
-- (void)enqueueAudioSamples:(const float *)samples length:(int32_t)n;
 @end
 
 @implementation Wfloat
@@ -87,12 +83,23 @@ RCT_EXPORT_MODULE()
 #endif
 
 - (void)dealloc {
+  [self.speechSession cancel];
+  self.speechSession = nil;
+
   if (self.tts) {
     SherpaOnnxDestroyOfflineTts(self.tts);
     self.tts = nil;
   }
 
   [self.loadModelSession invalidateAndCancel];
+}
+
+- (dispatch_queue_t)workQueue {
+  if (_workQueue == nil) {
+    _workQueue = dispatch_queue_create("com.wfloat.react-native-wfloat.work", DISPATCH_QUEUE_SERIAL);
+  }
+
+  return _workQueue;
 }
 
 - (BOOL)ensureDirectoryExistsAtPath:(NSString *)path error:(NSError **)error {
@@ -167,6 +174,48 @@ RCT_EXPORT_MODULE()
   (void)status;
   (void)progress;
 #endif
+}
+
+- (void)emitSpeechProgressWithRequestId:(NSInteger)requestId
+                               progress:(double)progress
+                              isPlaying:(BOOL)isPlaying
+                     textHighlightStart:(NSInteger)textHighlightStart
+                       textHighlightEnd:(NSInteger)textHighlightEnd
+                                   text:(NSString *)text {
+#ifdef RCT_NEW_ARCH_ENABLED
+  [self emitOnSpeechProgress:@{
+    @"requestId" : @(requestId),
+    @"progress" : @(progress),
+    @"isPlaying" : @(isPlaying),
+    @"textHighlightStart" : @(textHighlightStart),
+    @"textHighlightEnd" : @(textHighlightEnd),
+    @"text" : text ?: @"",
+  }];
+#else
+  (void)requestId;
+  (void)progress;
+  (void)isPlaying;
+  (void)textHighlightStart;
+  (void)textHighlightEnd;
+  (void)text;
+#endif
+}
+
+- (void)emitSpeechPlaybackFinishedWithRequestId:(NSInteger)requestId {
+#ifdef RCT_NEW_ARCH_ENABLED
+  [self emitOnSpeechPlaybackFinished:@{@"requestId" : @(requestId)}];
+#else
+  (void)requestId;
+#endif
+}
+
+- (void)cancelCurrentSpeechSession {
+  [self.speechSession cancel];
+  self.speechSession = nil;
+}
+
+- (BOOL)isCurrentSpeechSession:(WfloatSpeechSession *)session {
+  return self.speechSession != nil && self.speechSession == session;
 }
 
 - (void)clearPendingLoadModelState {
@@ -548,11 +597,148 @@ RCT_EXPORT_MODULE()
   }
 
   self.tts = newTts;
-  self.loadedModelId = modelId;
   self.loadedModelPath = modelPath;
   self.loadedTokensPath = tokensPath;
   self.loadedDataDir = dataDir;
   return YES;
+}
+
+- (NSArray<NSString *> *)stringArrayFromValue:(id)value {
+  if (![value isKindOfClass:[NSArray class]]) {
+    return @[];
+  }
+
+  NSMutableArray<NSString *> *result = [NSMutableArray array];
+  for (id item in (NSArray *)value) {
+    if ([item isKindOfClass:[NSString class]]) {
+      [result addObject:item];
+    }
+  }
+
+  return result;
+}
+
+- (NSDictionary *)preparedTextPayloadForText:(NSString *)text
+                                     emotion:(NSString *)emotion
+                                   intensity:(float)intensity
+                                       error:(NSError **)error {
+  const char *preparedTextCString =
+      SherpaOnnxOfflineTtsWfloatPrepareText(self.tts,
+                                            text.UTF8String,
+                                            emotion.UTF8String,
+                                            intensity);
+  if (!preparedTextCString) {
+    if (error) {
+      *error = [NSError errorWithDomain:WfloatErrorDomain
+                                   code:111
+                               userInfo:@{
+                                 NSLocalizedDescriptionKey :
+                                     @"Failed to prepare the input text for speech synthesis.",
+                               }];
+    }
+    return nil;
+  }
+
+  NSData *jsonData = [NSData dataWithBytes:preparedTextCString
+                                    length:strlen(preparedTextCString)];
+  SherpaOnnxOfflineTtsWfloatFreePreparedText(preparedTextCString);
+
+  NSDictionary *payload = nil;
+  id json = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:error];
+  if ([json isKindOfClass:[NSDictionary class]]) {
+    payload = json;
+  }
+
+  if (!payload && error && *error == nil) {
+    *error = [NSError errorWithDomain:WfloatErrorDomain
+                                 code:112
+                             userInfo:@{
+                               NSLocalizedDescriptionKey :
+                                   @"Prepared speech text had an unexpected format.",
+                             }];
+  }
+
+  return payload;
+}
+
+- (WfloatGenerateResult)generateSpeechForSession:(WfloatSpeechSession *)session
+                                            text:(NSString *)text
+                                             sid:(int32_t)sid
+                                         emotion:(NSString *)emotion
+                                       intensity:(float)intensity
+                                           speed:(float)speed
+                               silencePaddingSec:(float)silencePaddingSec
+                                           error:(NSError **)error {
+  NSDictionary *preparedPayload = [self preparedTextPayloadForText:text
+                                                           emotion:emotion
+                                                         intensity:intensity
+                                                             error:error];
+  if (!preparedPayload) {
+    return WfloatGenerateResultFailed;
+  }
+
+  NSArray<NSString *> *rawTextChunks = [self stringArrayFromValue:preparedPayload[@"text"]];
+  NSArray<NSString *> *textCleanChunks =
+      [self stringArrayFromValue:preparedPayload[@"text_clean"]];
+  NSUInteger totalChunkCount = textCleanChunks.count;
+  NSInteger rawTextCursor = 0;
+
+  if (totalChunkCount == 0) {
+    [session markGenerationComplete];
+    return session.isCancelled ? WfloatGenerateResultCancelled : WfloatGenerateResultCompleted;
+  }
+
+  for (NSUInteger index = 0; index < totalChunkCount; index += 1) {
+    if (session.isCancelled || ![self isCurrentSpeechSession:session]) {
+      return WfloatGenerateResultCancelled;
+    }
+
+    NSString *textClean = textCleanChunks[index];
+    const SherpaOnnxGeneratedAudio *generatedAudio =
+        SherpaOnnxOfflineTtsGenerate(self.tts, textClean.UTF8String, sid, speed);
+    if (!generatedAudio) {
+      if (error) {
+        *error = [NSError errorWithDomain:WfloatErrorDomain
+                                     code:113
+                                 userInfo:@{
+                                   NSLocalizedDescriptionKey :
+                                       @"Failed to generate speech audio from the prepared text.",
+                                 }];
+      }
+      return WfloatGenerateResultFailed;
+    }
+
+    NSString *rawChunkText = index < rawTextChunks.count ? rawTextChunks[index] : @"";
+    NSInteger highlightStart = rawTextCursor;
+    NSInteger highlightEnd = rawTextCursor + rawChunkText.length;
+    rawTextCursor = highlightEnd;
+
+    float chunkSilencePaddingSec = 0;
+    if (index + 1 < totalChunkCount && silencePaddingSec > 0) {
+      chunkSilencePaddingSec = silencePaddingSec;
+    }
+
+    NSError *scheduleError = nil;
+    BOOL didSchedule = [session scheduleAudioSamples:generatedAudio->samples
+                                          frameCount:generatedAudio->n
+                                            progress:(double)(index + 1) / (double)totalChunkCount
+                                                text:rawChunkText
+                                      highlightStart:highlightStart
+                                        highlightEnd:highlightEnd
+                                   silencePaddingSec:chunkSilencePaddingSec
+                                               error:&scheduleError];
+    SherpaOnnxDestroyOfflineTtsGeneratedAudio(generatedAudio);
+
+    if (!didSchedule) {
+      if (error) {
+        *error = scheduleError;
+      }
+      return session.isCancelled ? WfloatGenerateResultCancelled : WfloatGenerateResultFailed;
+    }
+  }
+
+  [session markGenerationComplete];
+  return session.isCancelled ? WfloatGenerateResultCancelled : WfloatGenerateResultCompleted;
 }
 
 - (void)cleanupStaleFilesInDirectory:(NSString *)directoryPath
@@ -632,9 +818,10 @@ RCT_EXPORT_MODULE()
     return;
   }
 
+  [self cancelCurrentSpeechSession];
   [self emitLoadModelProgressWithStatus:@"loading" progress:nil];
 
-  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+  dispatch_async(self.workQueue, ^{
     NSError *loadError = nil;
     BOOL didLoad = [self loadTtsWithModelPath:self.pendingModelPath
                                    tokensPath:self.pendingTokensPath
@@ -715,6 +902,133 @@ RCT_EXPORT_MODULE()
   [self finishPendingLoadModel];
 }
 
+- (void)generate:(JS::NativeWfloat::GenerateNativeOptions &)options
+         resolve:(RCTPromiseResolveBlock)resolve
+          reject:(RCTPromiseRejectBlock)reject {
+  if (!self.tts) {
+    reject(@"not_loaded",
+           @"SpeechClient is not created. Call SpeechClient.loadModel(...) first.",
+           nil);
+    return;
+  }
+
+  double requestIdValue = options.requestId();
+  NSString *text = options.text();
+  NSString *emotion = options.emotion();
+  double sidValue = options.sid();
+  double intensityValue = options.intensity();
+  double speedValue = options.speed();
+  double silencePaddingSecValue = options.silencePaddingSec();
+
+  if (!isfinite(requestIdValue) || requestIdValue < 0 || floor(requestIdValue) != requestIdValue) {
+    reject(@"invalid_arguments", @"requestId must be a non-negative integer.", nil);
+    return;
+  }
+
+  if (text.length == 0) {
+    reject(@"invalid_arguments", @"text is required.", nil);
+    return;
+  }
+
+  if (!isfinite(sidValue) || sidValue < 0 || floor(sidValue) != sidValue) {
+    reject(@"invalid_arguments", @"sid must be a non-negative integer.", nil);
+    return;
+  }
+
+  if (!isfinite(intensityValue)) {
+    intensityValue = 0.5;
+  }
+
+  if (!isfinite(speedValue) || speedValue <= 0) {
+    speedValue = 1.0;
+  }
+
+  if (!isfinite(silencePaddingSecValue) || silencePaddingSecValue < 0) {
+    silencePaddingSecValue = 0;
+  }
+
+  NSInteger requestId = (NSInteger)requestIdValue;
+  int32_t sid = (int32_t)sidValue;
+  float intensity = (float)MAX(0.0, MIN(intensityValue, 1.0));
+  float speed = (float)speedValue;
+  float silencePaddingSec = (float)silencePaddingSecValue;
+  int32_t sampleRate = SherpaOnnxOfflineTtsSampleRate(self.tts);
+
+  __weak Wfloat *weakSelf = self;
+  WfloatSpeechSession *session = [[WfloatSpeechSession alloc]
+      initWithRequestId:requestId
+             sampleRate:sampleRate
+        progressHandler:^(NSInteger progressRequestId,
+                          double progress,
+                          BOOL isPlaying,
+                          NSInteger textHighlightStart,
+                          NSInteger textHighlightEnd,
+                          NSString *chunkText) {
+          [weakSelf emitSpeechProgressWithRequestId:progressRequestId
+                                           progress:progress
+                                          isPlaying:isPlaying
+                                 textHighlightStart:textHighlightStart
+                                   textHighlightEnd:textHighlightEnd
+                                               text:chunkText];
+        }
+    playbackFinishedHandler:^(NSInteger finishedRequestId) {
+      if (!weakSelf) {
+        return;
+      }
+
+      if (weakSelf.speechSession.requestId == finishedRequestId) {
+        weakSelf.speechSession = nil;
+      }
+
+      [weakSelf emitSpeechPlaybackFinishedWithRequestId:finishedRequestId];
+    }];
+
+  WfloatSpeechSession *previousSession = self.speechSession;
+  self.speechSession = session;
+  [previousSession cancel];
+
+  dispatch_async(self.workQueue, ^{
+    NSError *generationError = nil;
+    WfloatGenerateResult result = [self generateSpeechForSession:session
+                                                            text:text
+                                                             sid:sid
+                                                         emotion:emotion
+                                                       intensity:intensity
+                                                           speed:speed
+                                               silencePaddingSec:silencePaddingSec
+                                                           error:&generationError];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (result == WfloatGenerateResultFailed) {
+        if ([self isCurrentSpeechSession:session]) {
+          [self cancelCurrentSpeechSession];
+        } else {
+          [session cancel];
+        }
+
+        reject(@"generate_failed",
+               generationError.localizedDescription ?: @"Failed to generate speech audio.",
+               generationError);
+        return;
+      }
+
+      resolve(nil);
+    });
+  });
+}
+
+- (void)play:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+  (void)reject;
+  [self.speechSession play];
+  resolve(nil);
+}
+
+- (void)pause:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
+  (void)reject;
+  [self.speechSession pause];
+  resolve(nil);
+}
+
 - (void)loadModel:(JS::NativeWfloat::LoadModelNativeOptions &)options
           resolve:(RCTPromiseResolveBlock)resolve
            reject:(RCTPromiseRejectBlock)reject {
@@ -784,13 +1098,6 @@ RCT_EXPORT_MODULE()
   self.lastEmittedDownloadProgress = -1;
 
   [self startNextPendingDownloadStep];
-}
-
-- (void)enqueueAudioSamples:(const float *)samples length:(int32_t)n {
-  NSData *pcmData = [NSData dataWithBytes:samples length:n * sizeof(float)];
-  dispatch_async(dispatch_get_main_queue(), ^{
-    [self.audioStreamer enqueuePCMData:pcmData];
-  });
 }
 
 - (void)URLSession:(NSURLSession *)session
@@ -871,85 +1178,6 @@ didCompleteWithError:(NSError *)error {
   [self rejectPendingLoadModelWithCode:@"download_failed"
                                message:error.localizedDescription ?: @"Failed to download model assets."
                                  error:error];
-}
-
-- (NSString *)speech:(NSString *)modelPath inputText:(NSString *)inputText {
-  (void)modelPath;
-  if (!self.tts) {
-    return @"SpeechClient.loadModel(...) must be called before speech().";
-  }
-
-  const SherpaOnnxGeneratedAudio *audio =
-      SherpaOnnxOfflineTtsGenerate(self.tts, [inputText UTF8String], 0, 1.0);
-
-  NSString *tempDirectoryPath = NSTemporaryDirectory();
-  NSString *timestamp =
-      [NSString stringWithFormat:@"%lld", (long long)[[NSDate date] timeIntervalSince1970]];
-  NSString *filePath = [tempDirectoryPath stringByAppendingPathComponent:[NSString stringWithFormat:@"audio_%@.wav", timestamp]];
-  const char *filename = [filePath UTF8String];
-
-  SherpaOnnxWriteWave(audio->samples, audio->n, audio->sample_rate, filename);
-  SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);
-  return filePath;
-}
-
-- (NSString *)playWav:(NSString *)filePath {
-  NSURL *fileURL = [NSURL fileURLWithPath:filePath];
-  NSError *error = nil;
-
-  self.audioPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:fileURL error:&error];
-  if (error) {
-    return [error localizedDescription];
-  }
-
-  [self.audioPlayer play];
-  return @"success";
-}
-
-- (void)streamSpeech:(NSString *)modelPath
-           inputText:(NSString *)inputText
-             resolve:(RCTPromiseResolveBlock)resolve
-              reject:(RCTPromiseRejectBlock)reject {
-  (void)modelPath;
-  if (!self.tts) {
-    reject(@"model_not_loaded", @"SpeechClient.loadModel(...) must be called before streamSpeech().", nil);
-    return;
-  }
-
-  g_self = self;
-  if (!self.audioStreamer) {
-    self.audioStreamer =
-        [[WfloatAudioStreamer alloc] initWithSampleRate:SherpaOnnxOfflineTtsSampleRate(self.tts)];
-  } else {
-    [self.audioStreamer stop];
-    self.audioStreamer =
-        [[WfloatAudioStreamer alloc] initWithSampleRate:SherpaOnnxOfflineTtsSampleRate(self.tts)];
-  }
-
-  [self.audioStreamer start];
-
-  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-    const SherpaOnnxGeneratedAudio *audio = SherpaOnnxOfflineTtsGenerateWithProgressCallback(
-        self.tts,
-        [inputText UTF8String],
-        0,
-        1.0,
-        StreamingCallback);
-
-    NSString *tempDirectoryPath = NSTemporaryDirectory();
-    NSString *timestamp =
-        [NSString stringWithFormat:@"%lld", (long long)[[NSDate date] timeIntervalSince1970]];
-    NSString *filePath = [tempDirectoryPath
-        stringByAppendingPathComponent:[NSString stringWithFormat:@"audio_%@.wav", timestamp]];
-    const char *filename = [filePath UTF8String];
-
-    SherpaOnnxWriteWave(audio->samples, audio->n, audio->sample_rate, filename);
-    SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-      resolve(filePath);
-    });
-  });
 }
 
 @end
