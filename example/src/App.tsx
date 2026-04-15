@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -230,6 +230,66 @@ export default function App() {
     }
   };
 
+  const handleGenerateDialogue = async () => {
+    const normalizedIntensity = clampUnit(Number(intensity), 0.5);
+    const normalizedSpeed = parsePositiveNumber(speed, 1);
+    const normalizedSilencePadding = parseNonNegativeNumber(
+      silencePaddingSec,
+      0.1
+    );
+    const normalizedVoiceId = normalizeVoiceIdInput(voiceId);
+
+    setStatus('generating');
+    setProgressEvent(null);
+    addLog('Generating two-segment dialogue.');
+
+    try {
+      await SpeechClient.generateDialogue({
+        segments: [
+          {
+            text,
+            voiceId: normalizedVoiceId,
+            emotion,
+            intensity: normalizedIntensity,
+            speed: normalizedSpeed,
+            sentenceSilencePaddingSec: normalizedSilencePadding,
+          },
+          {
+            text: 'This is a second dialogue segment using a different voice.',
+            voiceId:
+              selectedVoiceName === 'narrator_man'
+                ? 'narrator_woman'
+                : 'narrator_man',
+            emotion: 'joy',
+            intensity: 0.55,
+            speed: normalizedSpeed,
+            sentenceSilencePaddingSec: normalizedSilencePadding,
+          },
+        ],
+        speed: normalizedSpeed,
+        silenceBetweenSegmentsSec: 0.2,
+        onProgressCallback: (event) => {
+          setProgressEvent(event);
+        },
+        onFinishedPlayingCallback: () => {
+          setStatus(SpeechClient.getStatus());
+          addLog('Dialogue playback finished.', 'success');
+        },
+      });
+
+      const nextStatus = SpeechClient.getStatus();
+      setStatus(nextStatus);
+      addLog('Dialogue generation promise resolved.', 'success');
+    } catch (error) {
+      const nextStatus = SpeechClient.getStatus();
+      setStatus(nextStatus);
+      addLog(
+        error instanceof Error ? error.message : 'Failed to generate dialogue.',
+        'error'
+      );
+    }
+  };
+
   const handlePlay = async () => {
     try {
       await SpeechClient.play();
@@ -308,6 +368,7 @@ export default function App() {
             <View style={styles.buttonRow}>
               <ActionButton title="Load Model" onPress={handleLoadModel} />
               <ActionButton title="Generate" onPress={handleGenerate} />
+              <ActionButton title="Dialogue" onPress={handleGenerateDialogue} />
             </View>
             <View style={styles.buttonRow}>
               <ActionButton title="Play" onPress={handlePlay} secondary />

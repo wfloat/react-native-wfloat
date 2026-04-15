@@ -16,7 +16,7 @@ Pod::Spec.new do |s|
 
   s.vendored_frameworks = "ios/onnxruntime.xcframework", "ios/sherpa-onnx.xcframework"
   s.source_files = "ios/**/*.{h,m,mm,cpp}"
-  s.resources = "ios/resources/**/*"
+  s.libraries = "AppleArchive"
   # s.private_header_files = "ios/**/*.h"
 
   # Use install_modules_dependencies helper to install the dependencies if React Native version >=0.71.0.

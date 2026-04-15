@@ -20,6 +20,21 @@ export type GenerateNativeOptions = {
   silencePaddingSec: number;
 };
 
+export type GenerateDialogueNativeSegment = {
+  text: string;
+  sid: number;
+  emotion: string;
+  intensity: number;
+  speed: number;
+  sentenceSilencePaddingSec: number;
+};
+
+export type GenerateDialogueNativeOptions = {
+  requestId: number;
+  segments: GenerateDialogueNativeSegment[];
+  silenceBetweenSegmentsSec: number;
+};
+
 export type NativeLoadModelProgressEvent = {
   status: string;
   progress?: number;
@@ -41,6 +56,7 @@ export type NativeSpeechPlaybackFinishedEvent = {
 export interface Spec extends TurboModule {
   loadModel(options: LoadModelNativeOptions): Promise<void>;
   generate(options: GenerateNativeOptions): Promise<void>;
+  generateDialogue(options: GenerateDialogueNativeOptions): Promise<void>;
   play(): Promise<void>;
   pause(): Promise<void>;
   readonly onLoadModelProgress: EventEmitter<NativeLoadModelProgressEvent>;

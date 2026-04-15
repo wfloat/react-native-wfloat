@@ -13,6 +13,7 @@ import type {
   SpeechGenerateDialogueOptions,
   SpeechGenerateOptions,
   SpeechOnProgressEvent,
+  SpeechSegment,
 } from './speechTypes';
 import { SPEAKER_IDS, VALID_EMOTIONS, VALID_SIDS } from './speechTypes';
 
@@ -20,6 +21,7 @@ const DEFAULT_EMOTION: SpeechEmotion = 'neutral';
 const DEFAULT_INTENSITY = 0.5;
 const DEFAULT_SPEED = 1;
 const DEFAULT_SILENCE_PADDING_SEC = 0.1;
+const DEFAULT_SILENCE_BETWEEN_SEGMENTS_SEC = 0.2;
 const INPUT_PREVIEW_MAX_LENGTH = 100;
 
 type ActiveSpeechRequest = {
@@ -35,6 +37,20 @@ type NormalizedGenerateOptions = {
   intensity: number;
   speed: number;
   silencePaddingSec: number;
+};
+
+type NormalizedGenerateDialogueOptions = {
+  segments: NormalizedGenerateDialogueSegment[];
+  silenceBetweenSegmentsSec: number;
+};
+
+type NormalizedGenerateDialogueSegment = {
+  text: string;
+  sid: number;
+  emotion: SpeechEmotion;
+  intensity: number;
+  speed: number;
+  sentenceSilencePaddingSec: number;
 };
 
 export class SpeechClient {
@@ -148,11 +164,55 @@ export class SpeechClient {
   }
 
   static async generateDialogue(
-    _options: SpeechGenerateDialogueOptions
+    options: SpeechGenerateDialogueOptions
   ): Promise<void> {
-    throw new Error(
-      'SpeechClient.generateDialogue(...) is not implemented on React Native yet.'
-    );
+    if (!this.isModelLoaded) {
+      throw new Error(
+        'SpeechClient is not created. Call SpeechClient.loadModel(...) first.'
+      );
+    }
+
+    const normalizedOptions = this.normalizeGenerateDialogueOptions(options);
+    const requestId = this.nextRequestId;
+    this.nextRequestId += 1;
+
+    const hadActiveSession = this.activeSpeechRequest !== null;
+    if (hadActiveSession) {
+      this.status = 'terminating-generate';
+    }
+
+    this.subscribeToSpeechEvents();
+    this.activeGenerateRequestId = requestId;
+    this.activeSpeechRequest = {
+      requestId,
+      onProgressCallback: options.onProgressCallback ?? null,
+      onFinishedPlayingCallback: options.onFinishedPlayingCallback ?? null,
+    };
+    this.status = 'generating';
+
+    try {
+      await Wfloat.generateDialogue({
+        requestId,
+        segments: normalizedOptions.segments,
+        silenceBetweenSegmentsSec: normalizedOptions.silenceBetweenSegmentsSec,
+      });
+
+      if (this.activeGenerateRequestId === requestId) {
+        this.activeGenerateRequestId = null;
+        this.status = 'idle';
+      }
+    } catch (error) {
+      if (this.activeGenerateRequestId === requestId) {
+        this.activeGenerateRequestId = null;
+      }
+
+      if (this.activeSpeechRequest?.requestId === requestId) {
+        this.activeSpeechRequest = null;
+        this.status = this.isModelLoaded ? 'idle' : 'off';
+      }
+
+      throw error;
+    }
   }
 
   static async play(): Promise<void> {
@@ -296,6 +356,51 @@ export class SpeechClient {
     };
   }
 
+  private static normalizeGenerateDialogueOptions(
+    options: SpeechGenerateDialogueOptions
+  ): NormalizedGenerateDialogueOptions {
+    if (!options.segments?.length) {
+      throw new Error('segments is required.');
+    }
+
+    const defaultSpeed = this.normalizeSpeed(options.speed);
+
+    return {
+      segments: options.segments.map((segment, index) =>
+        this.normalizeGenerateDialogueSegment(segment, index, defaultSpeed)
+      ),
+      silenceBetweenSegmentsSec: this.normalizeNonNegativeNumber(
+        options.silenceBetweenSegmentsSec,
+        DEFAULT_SILENCE_BETWEEN_SEGMENTS_SEC
+      ),
+    };
+  }
+
+  private static normalizeGenerateDialogueSegment(
+    segment: SpeechSegment,
+    index: number,
+    defaultSpeed: number
+  ): NormalizedGenerateDialogueSegment {
+    if (!segment.text) {
+      throw new Error(`segments[${index}].text is required.`);
+    }
+
+    return {
+      text: segment.text,
+      sid: this.normalizeVoiceId(segment.voiceId),
+      emotion: this.normalizeEmotion(segment.emotion),
+      intensity: this.normalizeIntensity(segment.intensity),
+      speed:
+        typeof segment.speed === 'number' && Number.isFinite(segment.speed)
+          ? this.normalizeSpeed(segment.speed)
+          : defaultSpeed,
+      sentenceSilencePaddingSec: this.normalizeNonNegativeNumber(
+        segment.sentenceSilencePaddingSec,
+        DEFAULT_SILENCE_PADDING_SEC
+      ),
+    };
+  }
+
   private static normalizeVoiceId(
     voiceId: string | number | undefined
   ): number {
@@ -353,14 +458,21 @@ export class SpeechClient {
   private static normalizeSilencePaddingSec(
     silencePaddingSec: number | undefined
   ): number {
-    if (
-      typeof silencePaddingSec !== 'number' ||
-      !Number.isFinite(silencePaddingSec)
-    ) {
-      return DEFAULT_SILENCE_PADDING_SEC;
+    return this.normalizeNonNegativeNumber(
+      silencePaddingSec,
+      DEFAULT_SILENCE_PADDING_SEC
+    );
+  }
+
+  private static normalizeNonNegativeNumber(
+    value: number | undefined,
+    defaultValue: number
+  ): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return defaultValue;
     }
 
-    return Math.max(silencePaddingSec, 0);
+    return Math.max(value, 0);
   }
 
   static getOnProgressCallback():

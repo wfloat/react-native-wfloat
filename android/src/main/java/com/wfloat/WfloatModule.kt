@@ -27,6 +27,13 @@ class WfloatModule(reactContext: ReactApplicationContext) :
     )
   }
 
+  override fun generateDialogue(options: ReadableMap, promise: Promise) {
+    promise.reject(
+      "UNIMPLEMENTED",
+      "generateDialogue is only implemented on iOS right now."
+    )
+  }
+
   override fun play(promise: Promise) {
     promise.reject(
       "UNIMPLEMENTED",

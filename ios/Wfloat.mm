@@ -22,6 +22,29 @@ typedef NS_ENUM(NSInteger, WfloatGenerateResult) {
   WfloatGenerateResultFailed = 2,
 };
 
+@interface WfloatDialogueSegment : NSObject
+@property (nonatomic, copy) NSString *text;
+@property (nonatomic, assign) int32_t sid;
+@property (nonatomic, copy) NSString *emotion;
+@property (nonatomic, assign) float intensity;
+@property (nonatomic, assign) float speed;
+@property (nonatomic, assign) float sentenceSilencePaddingSec;
+@end
+
+@implementation WfloatDialogueSegment
+@end
+
+@interface WfloatPreparedDialogueSegment : NSObject
+@property (nonatomic, strong) NSArray<NSString *> *rawTextChunks;
+@property (nonatomic, strong) NSArray<NSString *> *textCleanChunks;
+@property (nonatomic, assign) int32_t sid;
+@property (nonatomic, assign) float speed;
+@property (nonatomic, assign) float sentenceSilencePaddingSec;
+@end
+
+@implementation WfloatPreparedDialogueSegment
+@end
+
 static NSString *WfloatCacheRootDirectory(void) {
   NSArray<NSString *> *paths =
       NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
@@ -741,6 +764,97 @@ RCT_EXPORT_MODULE()
   return session.isCancelled ? WfloatGenerateResultCancelled : WfloatGenerateResultCompleted;
 }
 
+- (WfloatGenerateResult)generateDialogueForSession:(WfloatSpeechSession *)session
+                                          segments:(NSArray<WfloatDialogueSegment *> *)segments
+                         silenceBetweenSegmentsSec:(float)silenceBetweenSegmentsSec
+                                             error:(NSError **)error {
+  NSMutableArray<WfloatPreparedDialogueSegment *> *preparedSegments =
+      [NSMutableArray arrayWithCapacity:segments.count];
+  NSUInteger totalChunkCount = 0;
+
+  for (WfloatDialogueSegment *segment in segments) {
+    if (session.isCancelled || ![self isCurrentSpeechSession:session]) {
+      return WfloatGenerateResultCancelled;
+    }
+
+    NSDictionary *preparedPayload = [self preparedTextPayloadForText:segment.text
+                                                             emotion:segment.emotion
+                                                           intensity:segment.intensity
+                                                               error:error];
+    if (!preparedPayload) {
+      return WfloatGenerateResultFailed;
+    }
+
+    WfloatPreparedDialogueSegment *preparedSegment =
+        [[WfloatPreparedDialogueSegment alloc] init];
+    preparedSegment.rawTextChunks = [self stringArrayFromValue:preparedPayload[@"text"]];
+    preparedSegment.textCleanChunks =
+        [self stringArrayFromValue:preparedPayload[@"text_clean"]];
+    preparedSegment.sid = segment.sid;
+    preparedSegment.speed = segment.speed;
+    preparedSegment.sentenceSilencePaddingSec = segment.sentenceSilencePaddingSec;
+    [preparedSegments addObject:preparedSegment];
+    totalChunkCount += preparedSegment.textCleanChunks.count;
+  }
+
+  if (totalChunkCount == 0) {
+    [session markGenerationComplete];
+    return session.isCancelled ? WfloatGenerateResultCancelled : WfloatGenerateResultCompleted;
+  }
+
+  NSUInteger progressIndex = 0;
+  for (WfloatPreparedDialogueSegment *segment in preparedSegments) {
+    for (NSUInteger index = 0; index < segment.textCleanChunks.count; index += 1) {
+      if (session.isCancelled || ![self isCurrentSpeechSession:session]) {
+        return WfloatGenerateResultCancelled;
+      }
+
+      NSString *textClean = segment.textCleanChunks[index];
+      const SherpaOnnxGeneratedAudio *generatedAudio =
+          SherpaOnnxOfflineTtsGenerate(self.tts, textClean.UTF8String, segment.sid, segment.speed);
+      if (!generatedAudio) {
+        if (error) {
+          *error = [NSError errorWithDomain:WfloatErrorDomain
+                                       code:113
+                                   userInfo:@{
+                                     NSLocalizedDescriptionKey :
+                                         @"Failed to generate speech audio from the prepared text.",
+                                   }];
+        }
+        return WfloatGenerateResultFailed;
+      }
+
+      progressIndex += 1;
+      NSString *rawChunkText = index < segment.rawTextChunks.count ? segment.rawTextChunks[index] : @"";
+      float silencePaddingSec = segment.sentenceSilencePaddingSec;
+      if (index + 1 == segment.textCleanChunks.count) {
+        silencePaddingSec = silenceBetweenSegmentsSec;
+      }
+
+      NSError *scheduleError = nil;
+      BOOL didSchedule = [session scheduleAudioSamples:generatedAudio->samples
+                                            frameCount:generatedAudio->n
+                                              progress:(double)progressIndex / (double)totalChunkCount
+                                                  text:rawChunkText
+                                        highlightStart:0
+                                          highlightEnd:1
+                                     silencePaddingSec:silencePaddingSec
+                                                 error:&scheduleError];
+      SherpaOnnxDestroyOfflineTtsGeneratedAudio(generatedAudio);
+
+      if (!didSchedule) {
+        if (error) {
+          *error = scheduleError;
+        }
+        return session.isCancelled ? WfloatGenerateResultCancelled : WfloatGenerateResultFailed;
+      }
+    }
+  }
+
+  [session markGenerationComplete];
+  return session.isCancelled ? WfloatGenerateResultCancelled : WfloatGenerateResultCompleted;
+}
+
 - (void)cleanupStaleFilesInDirectory:(NSString *)directoryPath
                     activeFileNames:(NSSet<NSString *> *)activeFileNames {
   NSError *contentsError = nil;
@@ -997,6 +1111,147 @@ RCT_EXPORT_MODULE()
                                                            speed:speed
                                                silencePaddingSec:silencePaddingSec
                                                            error:&generationError];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (result == WfloatGenerateResultFailed) {
+        if ([self isCurrentSpeechSession:session]) {
+          [self cancelCurrentSpeechSession];
+        } else {
+          [session cancel];
+        }
+
+        reject(@"generate_failed",
+               generationError.localizedDescription ?: @"Failed to generate speech audio.",
+               generationError);
+        return;
+      }
+
+      resolve(nil);
+    });
+  });
+}
+
+- (void)generateDialogue:(JS::NativeWfloat::GenerateDialogueNativeOptions &)options
+                 resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject {
+  if (!self.tts) {
+    reject(@"not_loaded",
+           @"SpeechClient is not created. Call SpeechClient.loadModel(...) first.",
+           nil);
+    return;
+  }
+
+  double requestIdValue = options.requestId();
+  auto nativeSegments = options.segments();
+  double silenceBetweenSegmentsSecValue = options.silenceBetweenSegmentsSec();
+
+  if (!isfinite(requestIdValue) || requestIdValue < 0 || floor(requestIdValue) != requestIdValue) {
+    reject(@"invalid_arguments", @"requestId must be a non-negative integer.", nil);
+    return;
+  }
+
+  if (nativeSegments.empty()) {
+    reject(@"invalid_arguments", @"segments is required.", nil);
+    return;
+  }
+
+  if (!isfinite(silenceBetweenSegmentsSecValue) || silenceBetweenSegmentsSecValue < 0) {
+    silenceBetweenSegmentsSecValue = 0.2;
+  }
+
+  NSMutableArray<WfloatDialogueSegment *> *segments =
+      [NSMutableArray arrayWithCapacity:(NSUInteger)nativeSegments.size()];
+  for (facebook::react::LazyVector<JS::NativeWfloat::GenerateDialogueNativeSegment>::size_type
+           index = 0;
+       index < nativeSegments.size();
+       index += 1) {
+    JS::NativeWfloat::GenerateDialogueNativeSegment nativeSegment = nativeSegments[index];
+    NSString *text = nativeSegment.text();
+    double sidValue = nativeSegment.sid();
+    NSString *emotion = nativeSegment.emotion();
+    double intensityValue = nativeSegment.intensity();
+    double speedValue = nativeSegment.speed();
+    double sentenceSilencePaddingSecValue = nativeSegment.sentenceSilencePaddingSec();
+
+    if (text.length == 0) {
+      reject(@"invalid_arguments",
+             [NSString stringWithFormat:@"segments[%d].text is required.", index],
+             nil);
+      return;
+    }
+
+    if (!isfinite(sidValue) || sidValue < 0 || floor(sidValue) != sidValue) {
+      reject(@"invalid_arguments", @"sid must be a non-negative integer.", nil);
+      return;
+    }
+
+    if (!isfinite(intensityValue)) {
+      intensityValue = 0.5;
+    }
+
+    if (!isfinite(speedValue) || speedValue <= 0) {
+      speedValue = 1.0;
+    }
+
+    if (!isfinite(sentenceSilencePaddingSecValue) ||
+        sentenceSilencePaddingSecValue < 0) {
+      sentenceSilencePaddingSecValue = 0.1;
+    }
+
+    WfloatDialogueSegment *segment = [[WfloatDialogueSegment alloc] init];
+    segment.text = text;
+    segment.sid = (int32_t)sidValue;
+    segment.emotion = emotion.length > 0 ? emotion : @"neutral";
+    segment.intensity = (float)MAX(0.0, MIN(intensityValue, 1.0));
+    segment.speed = (float)speedValue;
+    segment.sentenceSilencePaddingSec = (float)sentenceSilencePaddingSecValue;
+    [segments addObject:segment];
+  }
+
+  NSInteger requestId = (NSInteger)requestIdValue;
+  float silenceBetweenSegmentsSec = (float)silenceBetweenSegmentsSecValue;
+  int32_t sampleRate = SherpaOnnxOfflineTtsSampleRate(self.tts);
+
+  __weak Wfloat *weakSelf = self;
+  WfloatSpeechSession *session = [[WfloatSpeechSession alloc]
+      initWithRequestId:requestId
+             sampleRate:sampleRate
+        progressHandler:^(NSInteger progressRequestId,
+                          double progress,
+                          BOOL isPlaying,
+                          NSInteger textHighlightStart,
+                          NSInteger textHighlightEnd,
+                          NSString *chunkText) {
+          [weakSelf emitSpeechProgressWithRequestId:progressRequestId
+                                           progress:progress
+                                          isPlaying:isPlaying
+                                 textHighlightStart:textHighlightStart
+                                   textHighlightEnd:textHighlightEnd
+                                               text:chunkText];
+        }
+    playbackFinishedHandler:^(NSInteger finishedRequestId) {
+      if (!weakSelf) {
+        return;
+      }
+
+      if (weakSelf.speechSession.requestId == finishedRequestId) {
+        weakSelf.speechSession = nil;
+      }
+
+      [weakSelf emitSpeechPlaybackFinishedWithRequestId:finishedRequestId];
+    }];
+
+  WfloatSpeechSession *previousSession = self.speechSession;
+  self.speechSession = session;
+  [previousSession cancel];
+
+  dispatch_async(self.workQueue, ^{
+    NSError *generationError = nil;
+    WfloatGenerateResult result =
+        [self generateDialogueForSession:session
+                                segments:segments
+               silenceBetweenSegmentsSec:silenceBetweenSegmentsSec
+                                   error:&generationError];
 
     dispatch_async(dispatch_get_main_queue(), ^{
       if (result == WfloatGenerateResultFailed) {
