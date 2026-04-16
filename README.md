@@ -8,6 +8,26 @@ Wfloat package for react native
 npm install react-native-wfloat
 ```
 
+### Android JNI libraries
+
+This package expects the sherpa Android native libraries to live under
+`android/src/main/jniLibs/<abi>`.
+
+Install or refresh them with:
+
+```sh
+./install-android-jni-libs.sh
+```
+
+You can also pass an explicit version:
+
+```sh
+./install-android-jni-libs.sh 1.13.1
+```
+
+The installer downloads the combined Android archive from the Wfloat registry
+and copies the `.so` files into the matching ABI directories.
+
 ## Usage
 
 
