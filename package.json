@@ -61,7 +61,8 @@
   },
   "homepage": "https://github.com/wfloat/react-native-wfloat#readme",
   "publishConfig": {
-    "registry": "https://registry.wfloat.com/repository/react-native-wfloat/"
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
   "dependencies": {},
   "devDependencies": {
