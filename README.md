@@ -1,60 +1,134 @@
-# react-native-wfloat
+# @wfloat/react-native-wfloat
 
-Wfloat package for react native
+`@wfloat/react-native-wfloat` adds Wfloat text-to-speech to React Native apps on iOS and Android. Use it to turn text into spoken audio in your app.
 
-## Installation
+## Install
 
-```sh
-npm install react-native-wfloat
+```bash
+npm install @wfloat/react-native-wfloat
 ```
 
-### Android JNI libraries
-
-This package expects the sherpa Android native libraries to live under
-`android/src/main/jniLibs/<abi>`.
-
-Install or refresh them with:
-
-```sh
-./install-android-jni-libs.sh
+```bash
+yarn add @wfloat/react-native-wfloat
 ```
 
-You can also pass an explicit version:
+## iOS setup
 
-```sh
-./install-android-jni-libs.sh 1.13.1
+Install CocoaPods dependencies from your app's `ios/` directory:
+
+```bash
+cd ios
+pod install
+cd ..
 ```
 
-The installer downloads the combined Android archive from the Wfloat registry
-and copies the `.so` files into the matching ABI directories.
+React Native autolinking handles Android integration after the package is installed.
 
-## Usage
+## Quick start
 
+Your `modelId` is the **Model Credential** shown in your Wfloat account after purchase.
 
-```js
-import { multiply } from 'react-native-wfloat';
+```tsx
+import { SpeechClient } from "@wfloat/react-native-wfloat";
 
-// ...
+const modelId = "your-model-credential";
 
-const result = multiply(3, 7);
+await SpeechClient.loadModel(modelId, {
+  onProgressCallback(event) {
+    if (event.status === "downloading") {
+      console.log("Downloading", Math.round(event.progress * 100) + "%");
+      return;
+    }
+
+    if (event.status === "loading") {
+      console.log("Initializing native runtime");
+      return;
+    }
+
+    console.log("Model ready");
+  },
+});
+
+await SpeechClient.generate({
+  text: "All systems are stable. You can begin the launch sequence.",
+  voiceId: "narrator_woman",
+  emotion: "neutral",
+  intensity: 0.5,
+  speed: 1,
+  silencePaddingSec: 0.1,
+  onProgressCallback(event) {
+    console.log("progress", event.progress);
+    console.log("isPlaying", event.isPlaying);
+    console.log("highlight", event.textHighlightStart, event.textHighlightEnd);
+    console.log("chunkText", event.text);
+  },
+  onFinishedPlayingCallback() {
+    console.log("Playback finished");
+  },
+});
 ```
 
+## API overview
+
+- `SpeechClient.loadModel(modelId, { onProgressCallback })` loads the model for the current device. The first load downloads the model and native support assets for the platform.
+- `SpeechClient.generate(options)` generates a single utterance and starts playback.
+- `SpeechClient.generateDialogue(options)` generates multi-speaker dialogue from a list of segments.
+- `SpeechClient.pause()` and `SpeechClient.play()` control playback for the active request.
+- `SpeechClient.getStatus()` returns `"off" | "loading-model" | "generating" | "idle" | "terminating-generate"`.
+
+## Progress callbacks
+
+`loadModel(...)` emits:
+
+```ts
+{ status: "downloading", progress: number }
+{ status: "loading" }
+{ status: "completed" }
+```
+
+`generate(...)` and `generateDialogue(...)` emit:
+
+```ts
+{
+  progress: number;
+  isPlaying: boolean;
+  textHighlightStart: number;
+  textHighlightEnd: number;
+  text: string;
+}
+```
+
+## Dialogue example
+
+```tsx
+await SpeechClient.generateDialogue({
+  silenceBetweenSegmentsSec: 0.2,
+  onProgressCallback(event) {
+    console.log(event.progress);
+  },
+  onFinishedPlayingCallback() {
+    console.log("Dialogue finished");
+  },
+  segments: [
+    {
+      text: "We only get one pass at this.",
+      voiceId: "narrator_man",
+      emotion: "neutral",
+    },
+    {
+      text: "Then let's make the first pass count.",
+      voiceId: "strong_hero_woman",
+      emotion: "joy",
+      intensity: 0.65,
+    },
+  ],
+});
+```
+
+## Useful exports
+
+The package also exports `SPEAKER_IDS`, `VALID_EMOTIONS`, and `VALID_SIDS` for building voice pickers and validating user input.
 
 ## Contributing
 
-See the [contributing guide](CONTRIBUTING.md) to learn how to contribute to the repository and the development workflow.
-
-## License
-
-MIT
-
----
-
-Made with [create-react-native-library](https://github.com/callstack/react-native-builder-bob)
-
-## TODO: Fix the react-native-blob-util dependency according to this FAQ: https://callstack.github.io/react-native-builder-bob/faq#how-do-i-add-a-react-native-library-containing-native-code-as-a-dependency-in-my-library 
-
-cd ~/dev/react-native-wfloat && yarn clean && yarn prepare && cd example/ios && bundle exec pod install && cd ../..
-npm publish
-
-cd ~/dev/wfloat/packages/react-native-wfloat && yarn clean && yarn prepare && cd example/android && ./gradlew generateCodegenArtifactsFromSchema && cd ../..
+Maintainer and local development notes live in [CONTRIBUTING.md](CONTRIBUTING.md).

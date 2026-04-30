@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Maintainer-only helper for refreshing the Android JNI libs bundled in the
+# published @wfloat/react-native-wfloat package. App developers consuming the
+# package should not need to run this.
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
