@@ -8,7 +8,7 @@ export type ModelAssetsResponse = {
 };
 
 const MODEL_ASSET_HOST = 'https://wfloat.com';
-const WFLOAT_REACT_NATIVE_VERSION = '0.2.0';
+const WFLOAT_REACT_NATIVE_VERSION = '1.0.2';
 
 function getModelAssetPlatform(): string {
   switch (Platform.OS) {

@@ -27,6 +27,10 @@ internal class WfloatAudioSession(
   ) -> Unit,
   private val playbackFinishedHandler: (requestId: Int) -> Unit,
 ) {
+  companion object {
+    private const val BYTES_PER_PCM_FLOAT_SAMPLE = 4
+  }
+
   private data class AudioWriteItem(
     val samples: FloatArray,
   )
@@ -69,12 +73,19 @@ internal class WfloatAudioSession(
   private var totalFramesScheduled = 0L
 
   init {
+    require(sampleRate > 0) { "Invalid sample rate: $sampleRate" }
+
     val minBufferSize = AudioTrack.getMinBufferSize(
       sampleRate,
       AudioFormat.CHANNEL_OUT_MONO,
       AudioFormat.ENCODING_PCM_FLOAT
     )
-    val bufferSize = max(minBufferSize, sampleRate / 2)
+    require(minBufferSize > 0) {
+      "Failed to determine minimum audio buffer size for sample rate $sampleRate."
+    }
+
+    val targetBufferSizeBytes = (sampleRate * BYTES_PER_PCM_FLOAT_SAMPLE) / 2
+    val bufferSize = max(minBufferSize, targetBufferSizeBytes)
 
     val attributes = AudioAttributes.Builder()
       .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -94,6 +105,9 @@ internal class WfloatAudioSession(
       AudioTrack.MODE_STREAM,
       AudioManager.AUDIO_SESSION_ID_GENERATE
     )
+    require(track.state == AudioTrack.STATE_INITIALIZED) {
+      "Failed to initialize AudioTrack for sample rate $sampleRate and buffer size $bufferSize."
+    }
     track.play()
 
     playbackThread = Thread(
