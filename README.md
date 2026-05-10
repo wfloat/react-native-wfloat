@@ -26,7 +26,7 @@ React Native autolinking handles Android integration after the package is instal
 
 ## Quick start
 
-Your `modelId` is the **Model Credential** shown in your Wfloat account after sign up.
+Your `modelId` is the **Model Credential** shown in your Wfloat account after [sign up](https://wfloat.com/).
 
 ```tsx
 import { SpeechClient } from "@wfloat/react-native-wfloat";
